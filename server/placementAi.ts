@@ -1,4 +1,4 @@
-import { generateGeminiJson } from "./gemini.js";
+import { generateGeminiJson, getGemini } from "./gemini.js";
 import {
   UserDocument,
   JobDocument,
@@ -145,23 +145,129 @@ export function getCuratedResourceForTask(skillOrTopic: string, taskTitle: strin
   };
 }
 
-export function enrichRoadmapItemWithResource(item: any): any {
-  const curated = getCuratedResourceForTask(item.skill || item.topic || "", item.title || "");
-  let validUrl = curated.url;
-  if (item.resourceUrl && typeof item.resourceUrl === "string") {
-    const trimmed = item.resourceUrl.trim();
-    if ((trimmed.startsWith("https://") || trimmed.startsWith("http://")) && !trimmed.includes("example.com") && !trimmed.includes("javascript:") && !trimmed.includes("data:")) {
-      validUrl = trimmed;
+export async function fetchRealLearningResourceForTask(
+  skillOrTopic: string,
+  taskTitle: string
+): Promise<{ title: string; provider: string; url: string; reason: string } | null> {
+  try {
+    const ai = getGemini();
+    const prompt = `Search the real internet using Google Search for the single best, highest-quality official learning resource, tutorial, documentation, or practice page for the following technical task or topic:
+Task Title: "${taskTitle}"
+Skill/Topic: "${skillOrTopic}"
+
+You MUST use Google Search grounding to find an actual live webpage URL from an authoritative provider (e.g., MDN, official documentation, freeCodeCamp, W3Schools, Python.org, React.dev, GeeksforGeeks, GitHub docs, Microsoft Learn, LeetCode, etc.).
+Do NOT fabricate or guess URLs. The URL MUST come from the Google Search results.
+
+Return JSON in this exact structure only:
+{
+  "resource": {
+    "title": "Exact title of the learning resource",
+    "provider": "Provider/Website name",
+    "url": "https://...",
+    "reason": "Why this resource matches the task"
+  }
+}
+If no suitable real resource is found in search results, return:
+{
+  "resource": null
+}`;
+
+    const response = await ai.models.generateContent({
+      model: "gemini-3.8-flash",
+      contents: prompt,
+      config: {
+        tools: [{ googleSearch: {} }],
+        responseMimeType: "application/json",
+      },
+    });
+
+    if (!response || !response.text) return null;
+
+    let cleaned = response.text.trim();
+    if (cleaned.startsWith("```json")) {
+      cleaned = cleaned.replace(/^```json\s*/i, "").replace(/```\s*$/, "");
+    } else if (cleaned.startsWith("```")) {
+      cleaned = cleaned.replace(/^```\s*/, "").replace(/```\s*$/, "");
     }
+
+    const parsed = JSON.parse(cleaned);
+    const resObj = parsed?.resource;
+    if (!resObj || !resObj.url) return null;
+
+    let url = String(resObj.url).trim();
+    const groundingChunks = response.candidates?.[0]?.groundingMetadata?.groundingChunks || [];
+
+    let isValidUrl =
+      (url.startsWith("https://") || url.startsWith("http://")) &&
+      !url.includes("example.com") &&
+      !url.includes("javascript:") &&
+      !url.includes("data:");
+
+    if (isValidUrl && groundingChunks.length > 0) {
+      const matched = groundingChunks.some((chunk: any) => {
+        const uri = chunk?.web?.uri;
+        return uri && url.toLowerCase().includes(new URL(uri).hostname.toLowerCase());
+      });
+      if (!matched) {
+        for (const chunk of groundingChunks) {
+          const uri = chunk?.web?.uri;
+          if (uri && (uri.startsWith("http://") || uri.startsWith("https://"))) {
+            url = uri;
+            break;
+          }
+        }
+      }
+    }
+
+    if (!isValidUrl) return null;
+
+    return {
+      title: resObj.title || taskTitle || "Learn & Practice",
+      provider: resObj.provider || "Verified Source",
+      url: url,
+      reason: resObj.reason || "Matched via Google Search grounding."
+    };
+  } catch (err) {
+    console.warn("Error fetching grounded learning resource via Gemini:", err);
+    return null;
+  }
+}
+
+export async function enrichRoadmapItemWithGrounding(item: any): Promise<any> {
+  // Caching check: if already has valid grounded resourceUrl, keep it
+  if (
+    item.resourceUrl &&
+    typeof item.resourceUrl === "string" &&
+    (item.resourceUrl.startsWith("https://") || item.resourceUrl.startsWith("http://")) &&
+    !item.resourceUrl.includes("example.com") &&
+    !item.resourceUrl.includes("javascript:")
+  ) {
+    return item;
   }
 
-  return {
-    ...item,
-    linkText: item.linkText || curated.title,
-    resourceUrl: validUrl,
-    resourceProvider: item.resourceProvider || curated.provider,
-    resourceTopic: item.resourceTopic || curated.topic,
-  };
+  const grounded = await fetchRealLearningResourceForTask(
+    item.skill || item.topic || "",
+    item.title || ""
+  );
+
+  if (grounded) {
+    return {
+      ...item,
+      linkText: grounded.title,
+      resourceUrl: grounded.url,
+      resourceProvider: grounded.provider,
+      resourceTopic: item.topic || grounded.title,
+      reason: item.reason ? `${item.reason} Resource verified via Google Search grounding (${grounded.provider}).` : `Verified via Google Search grounding (${grounded.provider}).`
+    };
+  } else {
+    return {
+      ...item,
+      linkText: null,
+      resourceUrl: null,
+      resourceProvider: null,
+      resourceTopic: item.topic || item.skill,
+    };
+  }
 }
 
 export function quickJobMatch(student: UserDocument, job: JobDocument) {
