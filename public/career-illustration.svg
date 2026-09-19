@@ -1,0 +1,199 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 420" width="640" height="420" fill="none">
+  <g stroke="#111315" stroke-linecap="round" stroke-linejoin="round">
+    <!-- Top-Left 2x2 Dots -->
+    <g fill="#111315" stroke="none">
+      <circle cx="130" cy="140" r="2.2" />
+      <circle cx="145" cy="140" r="2.2" />
+      <circle cx="130" cy="155" r="2.2" />
+      <circle cx="145" cy="155" r="2.2" />
+    </g>
+
+    <!-- Top-Right 2x2 Dots -->
+    <g fill="#111315" stroke="none">
+      <circle cx="485" cy="140" r="2.2" />
+      <circle cx="500" cy="140" r="2.2" />
+      <circle cx="485" cy="155" r="2.2" />
+      <circle cx="500" cy="155" r="2.2" />
+    </g>
+
+    <!-- 4-point Sparkle Star -->
+    <path
+      d="M360 155 Q360 165 370 165 Q360 165 360 175 Q360 165 350 165 Q360 165 360 155 Z"
+      fill="#111315"
+      stroke="#111315"
+      stroke-width="1"
+    />
+
+    <!-- Desk Surface Lines -->
+    <!-- Top desk line -->
+    <line x1="90" y1="285" x2="550" y2="285" stroke-width="2.5" />
+    <!-- Desk edge lip -->
+    <line x1="95" y1="294" x2="545" y2="294" stroke-width="2.2" />
+
+    <!-- Desk Legs -->
+    <line x1="125" y1="294" x2="125" y2="350" stroke-width="2.2" />
+    <line x1="405" y1="294" x2="405" y2="350" stroke-width="2.2" />
+    <line x1="525" y1="294" x2="525" y2="350" stroke-width="2.2" />
+
+    <!-- Desk Mat / Subtle Angle Sheet under laptop -->
+    <path d="M245 284 L395 277 L435 284" stroke-width="1.6" fill="none" />
+
+    <!-- Left Potted Plant -->
+    <g id="potted-plant">
+      <!-- Pot -->
+      <path
+        d="M145 254 L175 254 L171 285 L149 285 Z"
+        fill="#FAF9F5"
+        stroke-width="2.2"
+      />
+      <!-- Center Leaf (straight upright almond) -->
+      <path
+        d="M160 254 C153 234 153 205 160 188 C167 205 167 234 160 254 Z"
+        fill="#FAF9F5"
+        stroke-width="2.2"
+      />
+      <!-- Left Leaf (curving outward left) -->
+      <path
+        d="M156 254 C140 240 126 226 130 216 C144 218 153 236 158 253"
+        fill="#FAF9F5"
+        stroke-width="2.2"
+      />
+      <!-- Right Leaf (curving outward right) -->
+      <path
+        d="M164 254 C180 240 194 226 190 216 C176 218 167 236 162 253"
+        fill="#FAF9F5"
+        stroke-width="2.2"
+      />
+    </g>
+
+    <!-- Student / Person -->
+    <g id="student-person">
+      <!-- Torso & Arms -->
+      <!-- Left Arm & Back Outline -->
+      <path
+        d="M272 195 C250 205 230 225 220 255 C215 270 218 284 225 284 C245 284 275 278 300 274"
+        fill="#FAF9F5"
+        stroke-width="2.3"
+      />
+      <!-- Forearm seam / fold line -->
+      <path
+        d="M245 252 C248 268 262 274 295 274"
+        fill="none"
+        stroke-width="2.2"
+      />
+      <!-- Sleeve Cuff -->
+      <line x1="295" y1="267" x2="295" y2="280" stroke-width="2.2" />
+
+      <!-- Right Arm reaching to typing position -->
+      <path
+        d="M295 200 C305 225 315 250 338 268"
+        fill="none"
+        stroke-width="2.3"
+      />
+
+      <!-- Hands typing on keyboard -->
+      <path
+        d="M295 273 C302 272 315 271 328 271 C335 271 340 273 345 275"
+        fill="none"
+        stroke-width="2.4"
+      />
+      <path
+        d="M325 268 C332 267 342 268 348 272"
+        fill="none"
+        stroke-width="2"
+      />
+
+      <!-- Body / Chest fill and right outline -->
+      <path
+        d="M272 195 C275 202 285 206 295 200 L305 235 C310 255 315 268 322 278 L280 284 Z"
+        fill="#FAF9F5"
+        stroke="none"
+      />
+
+      <!-- Neck & Shirt Collar -->
+      <!-- Neck -->
+      <path d="M274 170 L274 185 M292 170 L292 186" stroke-width="2.2" />
+      <!-- Crewneck Sweater line -->
+      <path d="M266 186 C274 196 292 196 300 186" fill="none" stroke-width="2.2" />
+      <!-- Collared Shirt Points peeking out -->
+      <path d="M272 186 L283 194 L283 186" fill="#FAF9F5" stroke-width="1.8" />
+      <path d="M294 186 L283 194" stroke-width="1.8" />
+
+      <!-- Head & Face Profile (3/4 angle facing right) -->
+      <!-- Chin and jaw -->
+      <path
+        d="M268 152 C268 174 286 175 296 166 C302 160 304 148 304 140"
+        fill="#FAF9F5"
+        stroke-width="2.2"
+      />
+      <!-- Left Ear -->
+      <path
+        d="M268 152 C262 153 262 162 268 164"
+        fill="#FAF9F5"
+        stroke-width="2.2"
+      />
+      <!-- Ear inner detail -->
+      <path d="M266 156 C264 158 266 160 268 160" stroke-width="1.5" />
+
+      <!-- Facial features -->
+      <!-- Eyebrows -->
+      <path d="M285 142 C288 141 292 141 294 143" stroke-width="1.8" />
+      <path d="M298 142 C301 141 304 142 306 144" stroke-width="1.8" />
+      <!-- Eyes (dots) -->
+      <circle cx="290" cy="148" r="1.6" fill="#111315" stroke="none" />
+      <circle cx="303" cy="149" r="1.6" fill="#111315" stroke="none" />
+      <!-- Nose -->
+      <path d="M299 148 C302 152 301 156 297 157" stroke-width="1.8" fill="none" />
+      <!-- Smile -->
+      <path d="M291 163 C295 166 300 165 303 162" stroke-width="1.8" fill="none" />
+
+      <!-- Hair (solid black stylish side-swept haircut) -->
+      <path
+        d="M268 152 C265 146 265 130 270 122 C276 112 292 108 306 110 C318 112 325 120 324 130 C322 138 316 142 312 142 C306 136 302 134 290 134 C280 134 274 140 270 148 Z"
+        fill="#111315"
+        stroke="#111315"
+        stroke-width="2"
+      />
+    </g>
+
+    <!-- Laptop (Seen from rear/3/4 angle) -->
+    <g id="laptop">
+      <!-- Laptop Screen (Solid black trapezoid facing user) -->
+      <polygon
+        points="356,220 436,220 416,280 342,280"
+        fill="#111315"
+        stroke="#111315"
+        stroke-width="2.2"
+      />
+      <!-- White circular logo in center of laptop lid -->
+      <circle cx="387" cy="249" r="4.2" fill="#FFFFFF" stroke="none" />
+      <!-- Laptop base along desk -->
+      <line x1="336" y1="281" x2="416" y2="281" stroke-width="2.4" />
+    </g>
+
+    <!-- Right Desk Items -->
+    <!-- Arched curve (lamp stem / wire) -->
+    <path
+      d="M435 285 C435 248 450 240 455 242"
+      fill="none"
+      stroke-width="2"
+    />
+
+    <!-- Pen Holder / Cup with Pens -->
+    <g id="pen-holder">
+      <!-- Cup -->
+      <rect
+        x="475"
+        y="256"
+        width="22"
+        height="29"
+        rx="1"
+        fill="#FAF9F5"
+        stroke-width="2.2"
+      />
+      <!-- Pens sticking out -->
+      <line x1="479" y1="256" x2="478" y2="236" stroke-width="2.2" />
+      <line x1="491" y1="256" x2="497" y2="235" stroke-width="2.2" />
+    </g>
+  </g>
+</svg>

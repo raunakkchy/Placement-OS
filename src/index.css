@@ -1,0 +1,221 @@
+@import "tailwindcss";
+
+/* Base HTML & Body: allow natural vertical scrolling across the entire app */
+html {
+  min-height: 100%;
+  background-color: #FAF9F5;
+  overflow-x: hidden;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+body {
+  min-height: 100%;
+  margin: 0;
+  padding: 0;
+  background-color: #FAF9F5;
+  overflow-x: hidden;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+#root {
+  min-height: 100%;
+  width: 100%;
+}
+
+/* ========================================================================= */
+/* MOBILE ONLY VERTICAL 30% / 70% SPLIT LAYOUT (max-width: 760px)            */
+/* Note: Only applied to the Login view that contains .mobile-auth-wrapper   */
+/* ========================================================================= */
+@media (max-width: 760px) {
+  html:has(.mobile-auth-wrapper),
+  body:has(.mobile-auth-wrapper) {
+    height: 100%;
+    overflow: hidden;
+  }
+
+  .mobile-auth-wrapper {
+    position: fixed;
+    inset: 0;
+    width: 100%;
+    height: 100vh !important;
+    height: 100dvh !important;
+    max-height: 100vh !important;
+    max-height: 100dvh !important;
+    min-height: 100vh !important;
+    min-height: 100dvh !important;
+    overflow: hidden !important;
+  }
+
+  .mobile-auth-main {
+    display: flex !important;
+    flex-direction: column !important;
+    height: 100vh !important;
+    height: 100dvh !important;
+    max-height: 100vh !important;
+    max-height: 100dvh !important;
+    min-height: 0 !important;
+    overflow: hidden !important;
+    grid-template-columns: none !important;
+  }
+
+  /* TOP SECTION = exactly 30% of viewport height */
+  .mobile-top-section {
+    height: 30vh !important;
+    height: 30dvh !important;
+    min-height: 30vh !important;
+    min-height: 30dvh !important;
+    max-height: 30vh !important;
+    max-height: 30dvh !important;
+    padding: 10px 16px 8px 16px !important;
+    border-bottom: 1px solid #E5E3DE !important;
+    border-right: none !important;
+    display: flex !important;
+    flex-direction: column !important;
+    justify-content: space-between !important;
+    overflow: hidden !important;
+    background-color: #FAF9F5 !important;
+    box-sizing: border-box !important;
+    flex-shrink: 0 !important;
+  }
+
+  .mobile-top-content {
+    display: flex !important;
+  }
+
+  .desktop-tablet-content {
+    display: none !important;
+  }
+
+  /* BOTTOM SECTION = exactly 70% of viewport height */
+  .mobile-bottom-section {
+    height: 70vh !important;
+    height: 70dvh !important;
+    min-height: 70vh !important;
+    min-height: 70dvh !important;
+    max-height: 70vh !important;
+    max-height: 70dvh !important;
+    padding: 12px 18px !important;
+    display: flex !important;
+    flex-direction: column !important;
+    justify-content: center !important;
+    align-items: center !important;
+    overflow-y: auto !important;
+    background-color: #FAF9F5 !important;
+    box-sizing: border-box !important;
+    flex-shrink: 0 !important;
+  }
+
+  .mobile-form-container {
+    max-width: 360px !important;
+    width: 100% !important;
+    padding: 0 !important;
+    margin: auto 0 !important;
+  }
+
+  /* Mobile scaling for bottom form controls to guarantee no overflow */
+  .mobile-login-header {
+    margin-bottom: 12px !important;
+  }
+
+  .mobile-login-title {
+    font-size: 24px !important;
+    line-height: 1.15 !important;
+  }
+
+  .mobile-login-subtitle {
+    font-size: 13px !important;
+    margin-top: 2px !important;
+  }
+
+  .mobile-form-spacing {
+    row-gap: 8px !important;
+  }
+
+  .mobile-input-field {
+    height: 44px !important;
+    min-height: 44px !important;
+    font-size: 14px !important;
+  }
+
+  .mobile-primary-btn {
+    height: 44px !important;
+    min-height: 44px !important;
+    font-size: 14.5px !important;
+  }
+
+  .mobile-google-btn {
+    height: 44px !important;
+    min-height: 44px !important;
+    font-size: 13.5px !important;
+  }
+
+  .mobile-divider {
+    padding-top: 6px !important;
+    padding-bottom: 6px !important;
+  }
+
+  .mobile-signup-row {
+    padding-top: 10px !important;
+    font-size: 13px !important;
+  }
+}
+
+@media (min-width: 761px) {
+  .mobile-top-content {
+    display: none !important;
+  }
+
+  .desktop-tablet-content {
+    display: flex !important;
+  }
+}
+
+/* ========================================================================= */
+/* DESKTOP / LAPTOP 50% / 50% SPLIT LAYOUT (min-width: 1024px)               */
+/* ========================================================================= */
+@media (min-width: 1024px) {
+  .desktop-auth-main {
+    display: flex !important;
+    flex-direction: row !important;
+    width: 100% !important;
+    height: 100vh !important;
+    max-height: 100vh !important;
+    min-height: 100vh !important;
+    overflow: hidden !important;
+  }
+
+  /* 50% LEFT SIDE */
+  .desktop-left-col {
+    width: 50% !important;
+    flex: 0 0 50% !important;
+    max-width: 50% !important;
+    min-width: 50% !important;
+    height: 100vh !important;
+    max-height: 100vh !important;
+    border-right: 1px solid #E5E3DE !important;
+    border-bottom: none !important;
+    overflow: hidden !important;
+    box-sizing: border-box !important;
+    background-color: #FAF9F5 !important;
+  }
+
+  /* 50% RIGHT SIDE */
+  .desktop-right-col {
+    width: 50% !important;
+    flex: 0 0 50% !important;
+    max-width: 50% !important;
+    min-width: 50% !important;
+    height: 100vh !important;
+    max-height: 100vh !important;
+    overflow-y: auto !important;
+    box-sizing: border-box !important;
+    background-color: #FAF9F5 !important;
+    display: flex !important;
+    flex-direction: column !important;
+    justify-content: center !important;
+    align-items: center !important;
+  }
+}
+

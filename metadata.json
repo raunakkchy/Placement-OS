@@ -1,0 +1,11 @@
+{
+  "name": "Remix PlacementOS",
+  "description": "AI-Powered Placement Operating System for college students with intelligent job matching, skill gap analysis, personalized roadmaps, readiness scoring, and real-time AI video mock interviews.",
+  "requestFramePermissions": [
+    "camera",
+    "microphone"
+  ],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
