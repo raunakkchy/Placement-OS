@@ -1255,15 +1255,14 @@ export async function initMongo(): Promise<void> {
       return;
     } catch (err: any) {
       console.error("[MongoDB Connection Error] Failed to connect to MONGODB_URI:", err.message);
-      if (isProduction) {
-        throw new Error(`[MongoDB Production Error] Cannot connect to production MONGODB_URI: ${err.message}`);
-      }
       console.warn(
-        `[MongoDB Dev Fallback] Could not connect to remote MONGODB_URI in development (${err.message}). Starting local in-memory engine for preview environment.`
+        `[MongoDB Fallback] Could not connect to remote MONGODB_URI (${err.message}). Starting local in-memory engine fallback.`
       );
     }
-  } else if (isProduction) {
-    throw new Error("[MongoDB Production Error] MONGODB_URI environment variable is required in production mode.");
+  } else {
+    console.warn(
+      "[MongoDB Notice] MONGODB_URI is not set. Starting in-memory MongoDB engine. Note: For permanent data storage on production hosts like Render, configure MONGODB_URI."
+    );
   }
 
   // Spin up real MongoMemoryServer for reliable container/preview execution

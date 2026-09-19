@@ -57,6 +57,33 @@ export function getAuthHeaders(): Record<string, string> {
   return headers;
 }
 
+async function parseApiResponse(res: Response, fallbackErrorMessage: string): Promise<any> {
+  const contentType = res.headers.get("content-type") || "";
+  if (contentType.includes("application/json")) {
+    try {
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error || fallbackErrorMessage);
+      }
+      return data;
+    } catch (err: any) {
+      if (err.message && err.message !== fallbackErrorMessage) {
+        throw err;
+      }
+      throw new Error(fallbackErrorMessage);
+    }
+  }
+
+  // If server returned HTML (e.g. 404/500 from static host like Vercel)
+  const text = await res.text().catch(() => "");
+  if (res.status === 404 || text.includes("The page could not be found")) {
+    throw new Error(
+      "Backend server is not running or API route not found (404). If you deployed on Vercel, Vercel only hosts static frontends by default. Deploy on Render/Railway or configure full-stack backend."
+    );
+  }
+  throw new Error(fallbackErrorMessage || `Server returned error (${res.status})`);
+}
+
 export async function loginStudent(credentials: {
   email: string;
   password: string;
@@ -80,10 +107,7 @@ export async function loginStudent(credentials: {
     body: JSON.stringify({ email, password }),
   });
 
-  const data = await res.json();
-  if (!res.ok) {
-    throw new Error(data.error || "Invalid login credentials.");
-  }
+  const data = await parseApiResponse(res, "Invalid login credentials.");
 
   if (data.token) {
     saveAuthToken(data.token, data.user?.email || email);
@@ -104,10 +128,7 @@ export async function registerStudent(
     body: JSON.stringify(userData),
   });
 
-  const data = await res.json();
-  if (!res.ok) {
-    throw new Error(data.error || "Registration failed.");
-  }
+  const data = await parseApiResponse(res, "Registration failed.");
 
   if (data.token) {
     saveAuthToken(data.token, data.user?.email || userData.email);
@@ -303,11 +324,7 @@ export async function deleteStudentResume(): Promise<{
     credentials: "include",
   });
 
-  const data = await res.json();
-  if (!res.ok) {
-    throw new Error(data.error || "Failed to remove resume.");
-  }
-
+  const data = await parseApiResponse(res, "Failed to remove resume.");
   return data;
 }
 
@@ -329,10 +346,7 @@ export async function identifyStudentAccount(
     body: JSON.stringify({ identifier }),
   });
 
-  const data = await res.json();
-  if (!res.ok) {
-    throw new Error(data.error || "Unable to identify account. Please check your credentials.");
-  }
+  const data = await parseApiResponse(res, "Unable to identify account. Please check your credentials.");
   return data;
 }
 
@@ -348,10 +362,7 @@ export async function verifySecurityAnswers(payload: {
     body: JSON.stringify(payload),
   });
 
-  const data = await res.json();
-  if (!res.ok) {
-    throw new Error(data.error || "The security answers are incorrect.");
-  }
+  const data = await parseApiResponse(res, "The security answers are incorrect.");
   return data;
 }
 
@@ -370,10 +381,7 @@ export async function resetPasswordWithSecurity(payload: {
     body: JSON.stringify(payload),
   });
 
-  const data = await res.json();
-  if (!res.ok) {
-    throw new Error(data.error || "Password reset failed. Please try again.");
-  }
+  const data = await parseApiResponse(res, "Password reset failed. Please try again.");
   return data;
 }
 
