@@ -214,6 +214,8 @@ export interface RoadmapItem {
   estimatedTime?: string;
   linkText?: string;
   resourceUrl?: string;
+  resourceProvider?: string;
+  resourceTopic?: string;
   difficulty?: "Beginner" | "Intermediate" | "Advanced";
   estimatedHours?: number;
   completed: boolean;

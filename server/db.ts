@@ -176,6 +176,8 @@ export interface RoadmapItem {
   estimatedTime?: string;
   linkText?: string;
   resourceUrl?: string;
+  resourceProvider?: string;
+  resourceTopic?: string;
   difficulty?: "Beginner" | "Intermediate" | "Advanced";
   estimatedHours?: number;
   completed: boolean;
@@ -470,6 +472,8 @@ const RoadmapSchema = new Schema<RoadmapDocument>(
             estimatedTime: { type: String },
             linkText: { type: String },
             resourceUrl: { type: String },
+            resourceProvider: { type: String },
+            resourceTopic: { type: String },
             difficulty: { type: String },
             estimatedHours: { type: Number },
             completed: { type: Boolean, default: false },

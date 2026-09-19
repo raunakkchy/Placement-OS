@@ -704,12 +704,44 @@ export const RoadmapView: React.FC<RoadmapViewProps> = ({
                                 </p>
                               )}
 
-                              {(item.linkText || item.resourceUrl) && (
-                                <div className="mt-1.5 flex items-center gap-1 text-[11px] font-semibold text-indigo-600">
-                                  <ExternalLink className="h-3 w-3" />
-                                  <span>Resource: {item.linkText || item.resourceUrl}</span>
-                                </div>
-                              )}
+                              {(item.linkText || item.resourceUrl) && (() => {
+                                const url = item.resourceUrl;
+                                const isValidUrl =
+                                  url &&
+                                  typeof url === "string" &&
+                                  (url.startsWith("https://") || url.startsWith("http://")) &&
+                                  !url.includes("javascript:") &&
+                                  !url.includes("example.com");
+                                const resourceTitle = item.linkText || item.title || "Learn & Practice";
+                                const provider = (item as any).resourceProvider || "Verified Educational Source";
+
+                                if (!isValidUrl) {
+                                  return (
+                                    <div className="mt-2 inline-flex items-center gap-1.5 rounded-lg bg-slate-100 border border-slate-200 px-2.5 py-1 text-[11px] font-medium text-slate-500">
+                                      <span className="h-2 w-2 rounded-full bg-slate-400"></span>
+                                      <span>Resource currently unavailable</span>
+                                    </div>
+                                  );
+                                }
+
+                                return (
+                                  <a
+                                    href={url}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="mt-2 inline-flex items-center gap-1.5 rounded-lg bg-indigo-50 hover:bg-indigo-100/90 border border-indigo-200/80 px-3 py-1.5 text-xs font-semibold text-indigo-700 transition-colors group shadow-2xs"
+                                    title="Opens external learning resource in a new browser tab"
+                                  >
+                                    <ExternalLink className="h-3.5 w-3.5 text-indigo-600 transition-transform group-hover:scale-110 shrink-0" />
+                                    <span>
+                                      Resource: {resourceTitle}
+                                    </span>
+                                    <span className="text-[10px] text-indigo-500 font-normal">
+                                      ({provider})
+                                    </span>
+                                  </a>
+                                );
+                              })()}
                             </div>
                           </div>
                         );

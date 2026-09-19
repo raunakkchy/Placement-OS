@@ -21,6 +21,149 @@ import {
   VERIFIED_CAREER_ROLES,
 } from "../src/data/careerRecommendationEngine.js";
 
+export function getCuratedResourceForTask(skillOrTopic: string, taskTitle: string = ""): { title: string; topic: string; provider: string; url: string } {
+  const query = `${skillOrTopic || ""} ${taskTitle || ""}`.toLowerCase();
+
+  if (query.includes("hardware") || query.includes("operating system") || query.includes("os basics") || query.includes("computer hardware")) {
+    return {
+      title: "Computer Hardware & OS Basics — Learn & Practice",
+      topic: "Computer Hardware & OS Basics",
+      provider: "GeeksforGeeks",
+      url: "https://www.geeksforgeeks.org/computer-organization-architecture-tutorials/"
+    };
+  }
+  if (query.includes("excel") || query.includes("office") || query.includes("word") || query.includes("spreadsheet")) {
+    return {
+      title: "Office Suite (Excel, Word) — Learn & Practice",
+      topic: "Office Suite (Excel, Word)",
+      provider: "Microsoft Support",
+      url: "https://support.microsoft.com/en-us/excel"
+    };
+  }
+  if (query.includes("javascript") || query.includes("js") || query.includes("es6")) {
+    return {
+      title: "MDN JavaScript Guide & Reference",
+      topic: "JavaScript",
+      provider: "MDN Web Docs",
+      url: "https://developer.mozilla.org/en-US/docs/Web/JavaScript"
+    };
+  }
+  if (query.includes("react") || query.includes("jsx") || query.includes("redux")) {
+    return {
+      title: "Official React Documentation & Tutorial",
+      topic: "React",
+      provider: "React.dev",
+      url: "https://react.dev/learn"
+    };
+  }
+  if (query.includes("python")) {
+    return {
+      title: "Official Python 3 Tutorial & Documentation",
+      topic: "Python",
+      provider: "Python.org",
+      url: "https://docs.python.org/3/tutorial/"
+    };
+  }
+  if (query.includes("sql") || query.includes("database") || query.includes("mysql") || query.includes("postgresql")) {
+    return {
+      title: "Interactive SQL Tutorial & Practice Hub",
+      topic: "SQL & Databases",
+      provider: "W3Schools",
+      url: "https://www.w3schools.com/sql/"
+    };
+  }
+  if (query.includes("git") || query.includes("github") || query.includes("version control")) {
+    return {
+      title: "Official Git Documentation & Cheat Sheet",
+      topic: "Git & Version Control",
+      provider: "Git-SCM",
+      url: "https://git-scm.com/doc"
+    };
+  }
+  if (query.includes("html") || query.includes("css") || query.includes("tailwind")) {
+    return {
+      title: "MDN HTML & CSS Learning Center",
+      topic: "HTML & CSS",
+      provider: "MDN Web Docs",
+      url: "https://developer.mozilla.org/en-US/docs/Web/HTML"
+    };
+  }
+  if (query.includes("dsa") || query.includes("algorithm") || query.includes("data structure")) {
+    return {
+      title: "Data Structures & Algorithms Learning Hub",
+      topic: "Data Structures & Algorithms",
+      provider: "GeeksforGeeks",
+      url: "https://www.geeksforgeeks.org/data-structures/"
+    };
+  }
+  if (query.includes("system design") || query.includes("architecture")) {
+    return {
+      title: "System Design Primer & Architecture Guide",
+      topic: "System Design",
+      provider: "GitHub (Donne Martin)",
+      url: "https://github.com/donnemartin/system-design-primer"
+    };
+  }
+  if (query.includes("deployment") || query.includes("ci/cd") || query.includes("devops")) {
+    return {
+      title: "GitHub Actions & Cloud Deployment Guide",
+      topic: "Deployment & CI/CD",
+      provider: "GitHub Docs",
+      url: "https://docs.github.com/en/actions"
+    };
+  }
+  if (query.includes("assessment")) {
+    return {
+      title: "PlacementOS Assessment Room & Practice",
+      topic: "Technical Assessment",
+      provider: "LeetCode Practice",
+      url: "https://leetcode.com/"
+    };
+  }
+  if (query.includes("interview")) {
+    return {
+      title: "PlacementOS Mock Interview Studio",
+      topic: "Interview Preparation",
+      provider: "Pramp / Interview Prep",
+      url: "https://www.pramp.com/"
+    };
+  }
+  if (query.includes("project") || query.includes("spec") || query.includes("github template")) {
+    return {
+      title: "GitHub Project Template & Specification",
+      topic: "Portfolio Capstone",
+      provider: "GitHub",
+      url: "https://github.com/"
+    };
+  }
+
+  return {
+    title: `${skillOrTopic || taskTitle || "Technical"} Official Documentation & Practice`,
+    topic: skillOrTopic || "Core Engineering",
+    provider: "freeCodeCamp",
+    url: "https://www.freecodecamp.org/learn/"
+  };
+}
+
+export function enrichRoadmapItemWithResource(item: any): any {
+  const curated = getCuratedResourceForTask(item.skill || item.topic || "", item.title || "");
+  let validUrl = curated.url;
+  if (item.resourceUrl && typeof item.resourceUrl === "string") {
+    const trimmed = item.resourceUrl.trim();
+    if ((trimmed.startsWith("https://") || trimmed.startsWith("http://")) && !trimmed.includes("example.com") && !trimmed.includes("javascript:") && !trimmed.includes("data:")) {
+      validUrl = trimmed;
+    }
+  }
+
+  return {
+    ...item,
+    linkText: item.linkText || curated.title,
+    resourceUrl: validUrl,
+    resourceProvider: item.resourceProvider || curated.provider,
+    resourceTopic: item.resourceTopic || curated.topic,
+  };
+}
+
 export function quickJobMatch(student: UserDocument, job: JobDocument) {
   // 1. CGPA cutoff check
   const cgpaPass = student.cgpa >= job.minCgpa;
