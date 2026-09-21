@@ -227,7 +227,7 @@ export interface InterviewQuestionReview {
   question: string;
   category: "Technical" | "System Design" | "DSA" | "Project Deep-Dive" | "CS Fundamentals" | "Behavioral" | "Problem-Solving" | "Role-Specific" | string;
   studentAnswer: string;
-  score: number; // 0 - 20
+  score: number | null; // 0 - 20, or null if unassessed
   interviewerCritique: string;
   modelAnswerKey: string;
   strengths: string[];
@@ -235,6 +235,20 @@ export interface InterviewQuestionReview {
   skill?: string;
   topic?: string;
   difficulty?: "Beginner" | "Intermediate" | "Advanced";
+}
+
+export interface InterviewSubScores {
+  technicalKnowledge: number | null; // 0-20, or null if unassessed
+  problemSolving: number | null; // 0-20, or null if unassessed
+  communication: number | null; // 0-20, or null if unassessed
+  accuracy: number | null; // 0-20, or null if unassessed
+  depthOfUnderstanding: number | null; // 0-20, or null if unassessed
+  roleRelevance: number | null; // 0-20, or null if unassessed
+  communicationClarity?: number | null; // 0-20
+  confidencePacing?: number | null; // 0-20
+  roleAlignment?: number | null; // 0-20
+  roleKnowledge?: number | null; // 0-20
+  answerQuality?: number | null; // 0-20
 }
 
 export interface InterviewDocument {
@@ -245,15 +259,7 @@ export interface InterviewDocument {
   companyTarget?: string;
   overallScore: number | null; // 0 - 100, or null if unassessed
   scoreAssessed?: boolean;
-  subScores: {
-    technicalKnowledge: number; // 0-20
-    problemSolving: number; // 0-20
-    communicationClarity: number; // 0-20
-    confidencePacing?: number; // 0-20
-    roleAlignment: number; // 0-20
-    roleKnowledge?: number; // 0-20
-    answerQuality?: number; // 0-20
-  };
+  subScores: InterviewSubScores;
   durationMinutes: number;
   questionsCount: number;
   questionReviews: InterviewQuestionReview[];
@@ -1046,6 +1052,97 @@ async function seedDefaultJobs(): Promise<void> {
   }
 }
 
+// Helper to seed default active student profile if database is fresh
+export async function seedDefaultStudent(): Promise<void> {
+  try {
+    const count = await UserModel.countDocuments();
+    if (count === 0) {
+      const demoId = "student-raunak-default";
+      const demoEmail = "raunakkchy@gmail.com";
+      const demoUser: UserDocument = {
+        id: demoId,
+        email: demoEmail,
+        passwordHash: "$2a$10$nOuIs54PNSTm79wqvi5zNu4rVuVWBk2X.XF/XG1M1lUjE3W1N6.S6", // Precomputed hash for Password@123
+        fullName: "Raunak Chaudhary",
+        phone: "+91 9876543210",
+        rollNumber: "21CS042",
+        college: "National Institute of Technology",
+        course: "B.Tech",
+        branch: "Computer Science",
+        semester: 7,
+        cgpa: 8.65,
+        tenthMarks: 94,
+        twelfthMarks: 91,
+        graduationYear: 2026,
+        courseDuration: "4 Years",
+        backlogs: 0,
+        skills: [
+          "Data Structures & Algorithms",
+          "JavaScript",
+          "TypeScript",
+          "React",
+          "Node.js",
+          "Python",
+          "SQL",
+          "System Design",
+          "Git",
+          "Docker",
+        ],
+        skillsWithLevels: [
+          { name: "Data Structures & Algorithms", level: "Advanced" },
+          { name: "JavaScript", level: "Advanced" },
+          { name: "React", level: "Advanced" },
+          { name: "Node.js", level: "Intermediate" },
+          { name: "Python", level: "Intermediate" },
+          { name: "SQL", level: "Intermediate" },
+          { name: "System Design", level: "Intermediate" },
+        ],
+        targetRoles: ["Software Development Engineer", "Full Stack Developer", "Backend Engineer"],
+        selectedRole: "Software Development Engineer",
+        onboardingCompleted: true,
+        careerPreferences: {
+          careerGoal: "Software Development Engineer",
+          preferredField: "Software Development",
+          preferredJobType: "Full-time",
+        },
+        projects: [
+          {
+            id: "proj-1",
+            title: "Campus Placement OS Platform",
+            description: "Full-stack AI assessment engine with real-time adaptive mock interviews, dynamic skill gap analysis, and tailored roadmaps.",
+            techStack: ["React", "TypeScript", "Node.js", "Express", "MongoDB", "Gemini AI"],
+            githubUrl: "https://github.com",
+            liveUrl: "https://placementos.app",
+          },
+        ],
+        experience: {
+          hasExperience: true,
+          company: "Tech Mahindra",
+          role: "Software Engineering Intern",
+          duration: "3 Months (Summer 2025)",
+          description: "Developed REST APIs for telemetry aggregation and optimized database queries by 35%.",
+        },
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      };
+
+      await UserModel.create(demoUser);
+
+      // Create persistent session
+      const sessionToken = "placement_session_default_raunak";
+      await SessionModel.create({
+        token: sessionToken,
+        userId: demoId,
+        createdAt: new Date().toISOString(),
+        expiresAt: new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString(),
+      });
+      console.log(`[MongoDB] Initialized default student profile for ${demoEmail}`);
+    }
+  } catch (err: any) {
+    console.error("[MongoDB] Error checking/seeding student profile:", err.message);
+  }
+}
+
 // ----------------------------------------------------
 // MONGODB SERVICE INTERFACE (Async CRUD Operations)
 // ----------------------------------------------------
@@ -1256,6 +1353,7 @@ export async function initMongo(): Promise<void> {
       });
       console.log("[MongoDB] Connected to configured MONGODB_URI database via Mongoose successfully.");
       await seedDefaultJobs();
+      await seedDefaultStudent();
       return;
     } catch (err: any) {
       console.error("[MongoDB Connection Error] Failed to connect to MONGODB_URI:", err.message);
@@ -1277,6 +1375,7 @@ export async function initMongo(): Promise<void> {
     await mongoose.connect(memoryUri);
     console.log("[MongoDB] Started live in-memory MongoDB instance and connected via Mongoose.");
     await seedDefaultJobs();
+    await seedDefaultStudent();
   } catch (err: any) {
     console.error("[MongoDB Engine Error] Failed to initialize MongoDB:", err.message);
     throw err;

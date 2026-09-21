@@ -54,6 +54,7 @@ export const RoadmapView: React.FC<RoadmapViewProps> = ({
   user,
   onNavigateToRoles,
 }) => {
+  const [taskFilter, setTaskFilter] = useState<"all" | "in_progress" | "completed">("all");
   const [expandedPhases, setExpandedPhases] = useState<Record<number, boolean>>({
     1: true,
     2: true,
@@ -239,7 +240,7 @@ export const RoadmapView: React.FC<RoadmapViewProps> = ({
             {/* Section Header */}
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-slate-100">
               <div className="flex items-center gap-3">
-                <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-indigo-600 text-white shadow-sm">
+                <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-orange-50 text-[#FF5A36] border border-orange-100 shadow-xs">
                   <Target className="h-5 w-5" />
                 </div>
                 <div>
@@ -247,7 +248,7 @@ export const RoadmapView: React.FC<RoadmapViewProps> = ({
                     <h2 className="text-lg font-extrabold text-slate-900">
                       AI Skill Gap Analysis
                     </h2>
-                    <span className="rounded-full bg-indigo-50 border border-indigo-200 px-2 py-0.5 text-[11px] font-semibold text-indigo-800">
+                    <span className="rounded-full bg-orange-50 border border-orange-200/60 px-2 py-0.5 text-[11px] font-bold text-[#FF5A36]">
                       Target Role: {roadmap.selectedRole || roadmap.jobTitle}
                     </span>
                   </div>
@@ -480,43 +481,44 @@ export const RoadmapView: React.FC<RoadmapViewProps> = ({
           {/* ========================================================== */}
           {/* PERSONALIZED LEARNING ROADMAP OVERVIEW CARD                */}
           {/* ========================================================== */}
-          <div className="rounded-2xl bg-gradient-to-br from-slate-900 via-indigo-950 to-slate-900 p-6 text-white shadow-xl">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          <div className="rounded-3xl bg-gradient-to-br from-[#2E5BFF] via-[#2F54EB] to-[#1C3ED8] p-6 text-white shadow-md relative overflow-hidden">
+            <div className="absolute -top-12 -right-12 w-44 h-44 rounded-full bg-white/10 blur-xl pointer-events-none" />
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 relative z-10">
               <div>
-                <span className="text-xs font-bold tracking-wider uppercase text-indigo-300">
+                <span className="text-xs font-bold tracking-wider uppercase text-blue-200">
                   Target Role Preparation
                 </span>
-                <h2 className="text-xl font-extrabold text-white mt-0.5">
+                <h2 className="text-xl sm:text-2xl font-black text-white mt-0.5">
                   {roadmap.jobTitle} {roadmap.companyName && roadmap.companyName !== "Campus Placement" ? `at ${roadmap.companyName}` : "Placement Path"}
                 </h2>
-                <div className="mt-1 text-xs text-slate-300">
+                <div className="mt-1 text-xs text-blue-100 font-medium">
                   Student: {user.fullName} ({user.course} {user.branch}, Sem {user.semester})
                 </div>
               </div>
 
               {/* Progress metric */}
-              <div className="flex items-center gap-4 shrink-0 bg-white/10 p-3.5 rounded-xl border border-white/10">
+              <div className="flex items-center gap-4 shrink-0 bg-white/15 backdrop-blur-md p-3.5 rounded-2xl border border-white/20">
                 <div className="text-right">
                   <div className="text-2xl font-black text-white">{progressPercent}%</div>
-                  <div className="text-[11px] font-medium text-indigo-200">
+                  <div className="text-[11px] font-semibold text-blue-100">
                     {completedTasks} of {totalTasks} Tasks Done
                   </div>
                 </div>
-                <div className="h-10 w-10 rounded-full border-4 border-emerald-400/40 border-t-emerald-400 flex items-center justify-center font-bold text-xs text-emerald-300">
+                <div className="h-11 w-11 rounded-full border-4 border-emerald-400/40 border-t-emerald-400 flex items-center justify-center font-bold text-xs text-emerald-300">
                   {completedTasks === totalTasks && totalTasks > 0 ? "★" : "✓"}
                 </div>
               </div>
             </div>
 
             {/* Overall progress bar */}
-            <div className="mt-5">
-              <div className="flex items-center justify-between text-xs text-indigo-200 mb-1.5">
+            <div className="mt-5 relative z-10">
+              <div className="flex items-center justify-between text-xs text-blue-100 font-semibold mb-1.5">
                 <span>Placement Readiness Milestones</span>
                 <span>{completedTasks} of {totalTasks} tasks completed</span>
               </div>
-              <div className="h-2.5 w-full rounded-full bg-black/40 overflow-hidden">
+              <div className="h-2.5 w-full rounded-full bg-black/20 overflow-hidden">
                 <div
-                  className="h-full rounded-full bg-gradient-to-r from-teal-400 via-emerald-400 to-indigo-400 transition-all duration-500"
+                  className="h-full rounded-full bg-white transition-all duration-500"
                   style={{ width: `${progressPercent}%` }}
                 />
               </div>
@@ -546,13 +548,33 @@ export const RoadmapView: React.FC<RoadmapViewProps> = ({
           {/* SEQUENTIAL ROADMAP PHASES LIST                            */}
           {/* ========================================================== */}
           <div className="space-y-4">
-            <div className="flex items-center justify-between">
-              <h2 className="text-lg font-bold text-slate-900">
-                Sequential Learning Modules
-              </h2>
-              <span className="text-xs text-slate-500">
-                Check off items as you complete them to update placement readiness.
-              </span>
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div>
+                <h2 className="text-lg font-bold text-slate-900">
+                  Sequential Learning Modules
+                </h2>
+                <span className="text-xs text-slate-500">
+                  Check off items as you complete them to update placement readiness.
+                </span>
+              </div>
+
+              {/* Task Status Filters */}
+              <div className="inline-flex items-center gap-1 bg-slate-100 p-1 rounded-xl border border-slate-200/80">
+                {(["all", "in_progress", "completed"] as const).map((filter) => (
+                  <button
+                    key={filter}
+                    type="button"
+                    onClick={() => setTaskFilter(filter)}
+                    className={`px-3 py-1 text-xs font-bold rounded-lg transition-all ${
+                      taskFilter === filter
+                        ? "bg-white text-slate-900 shadow-xs border border-slate-200/60"
+                        : "text-slate-600 hover:text-slate-900"
+                    }`}
+                  >
+                    {filter === "all" ? "All" : filter === "in_progress" ? "In Progress" : "Completed"}
+                  </button>
+                ))}
+              </div>
             </div>
 
             {roadmap.phases.map((phase) => {
@@ -561,6 +583,11 @@ export const RoadmapView: React.FC<RoadmapViewProps> = ({
               const totalItems = phaseItems.length;
               const completedCount = phaseItems.filter((i) => i.completed).length;
               const phasePercent = totalItems > 0 ? Math.round((completedCount / totalItems) * 100) : 0;
+              const displayItems = phaseItems.filter((item) => {
+                if (taskFilter === "completed") return item.completed;
+                if (taskFilter === "in_progress") return !item.completed;
+                return true;
+              });
 
               return (
                 <div
@@ -609,7 +636,12 @@ export const RoadmapView: React.FC<RoadmapViewProps> = ({
                   {/* Phase Tasks Checklist */}
                   {isExpanded && (
                     <div className="p-5 divide-y divide-slate-100">
-                      {phase.items.map((item) => {
+                      {displayItems.length === 0 ? (
+                        <p className="py-4 text-center text-xs text-slate-400 italic">
+                          No tasks match the selected filter in this phase.
+                        </p>
+                      ) : (
+                        displayItems.map((item) => {
                         const badge = getCategoryBadge(item.type || item.category);
                         const BadgeIcon = badge.icon;
                         const priorityClass = getPriorityBadge(item.priority);
@@ -745,7 +777,7 @@ export const RoadmapView: React.FC<RoadmapViewProps> = ({
                             </div>
                           </div>
                         );
-                      })}
+                      }))}
                     </div>
                   )}
                 </div>

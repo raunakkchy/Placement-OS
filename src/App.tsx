@@ -1,6 +1,8 @@
 import React, { useState, useEffect } from "react";
 import { User, ReadinessScore, Roadmap, InterviewReport, DashboardData } from "./types";
-import { Navbar } from "./components/Navbar";
+import { AppSidebar } from "./components/navigation/AppSidebar";
+import { AppHeader } from "./components/navigation/AppHeader";
+import { MobileBottomNav } from "./components/navigation/MobileBottomNav";
 import { ScoreDashboard } from "./components/ScoreDashboard";
 import { AiJobRoleRecommendations } from "./components/AiJobRoleRecommendations";
 import { RoadmapView } from "./components/RoadmapView";
@@ -20,10 +22,19 @@ export default function App() {
   const [isEditingCareerProfile, setIsEditingCareerProfile] = useState(false);
 
   const [activeTab, setActiveTab] = useState<"score" | "jobs" | "roadmap" | "interview">("score");
+  const [isInterviewActive, setIsInterviewActive] = useState(false);
   const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
   const [authModalMode, setAuthModalMode] = useState<"login" | "register">("register");
   const [isProfileDrawerOpen, setIsProfileDrawerOpen] = useState(false);
   const [isLogoutModalOpen, setIsLogoutModalOpen] = useState(false);
+  const [isMobileDrawerOpen, setIsMobileDrawerOpen] = useState(false);
+
+  // Automatically reset interview active state if tab switches
+  useEffect(() => {
+    if (activeTab !== "interview") {
+      setIsInterviewActive(false);
+    }
+  }, [activeTab]);
 
   const handleOpenAuth = (mode: "login" | "register" = "register") => {
     setAuthModalMode(mode);
@@ -294,78 +305,125 @@ export default function App() {
     }
 
     return (
-      <div className="min-h-screen bg-slate-100/70 text-slate-900 flex flex-col font-sans selection:bg-slate-900 selection:text-white">
-        {/* Top Application Navbar */}
-        <Navbar
-          user={user}
-          readinessScore={readinessScore}
-          activeTab={activeTab}
-          setActiveTab={setActiveTab}
-          onOpenProfile={() => setIsProfileDrawerOpen(true)}
-          onLogout={() => setIsLogoutModalOpen(true)}
-          onOpenAuth={(mode) => handleOpenAuth(mode || "register")}
-        />
+      <div className="min-h-screen bg-[#F4F6FB] text-slate-900 flex font-sans selection:bg-[#2F54EB] selection:text-white antialiased">
+        {/* Persistent Left Sidebar on Desktop (1024px+) */}
+        <div className="hidden lg:block shrink-0 sticky top-0 h-screen z-30">
+          <AppSidebar
+            user={user}
+            readinessScore={readinessScore}
+            activeTab={activeTab}
+            setActiveTab={setActiveTab}
+            onOpenProfile={() => setIsProfileDrawerOpen(true)}
+            onLogout={() => setIsLogoutModalOpen(true)}
+          />
+        </div>
 
-        {/* Main Content Area */}
-        <main className="flex-1 max-w-7xl w-full mx-auto p-4 sm:p-6 lg:p-8">
-          <div>
-            {activeTab === "score" && user && (
-              <ScoreDashboard
+        {/* Slide-out Mobile/Tablet Drawer */}
+        {isMobileDrawerOpen && (
+          <div className="fixed inset-0 z-50 lg:hidden flex">
+            <div
+              className="fixed inset-0 bg-slate-900/40 backdrop-blur-xs transition-opacity"
+              onClick={() => setIsMobileDrawerOpen(false)}
+            />
+            <div className="relative z-10 w-72 max-w-[85vw] h-full shadow-2xl animate-in slide-in-from-left duration-200">
+              <AppSidebar
                 user={user}
-                score={readinessScore}
-                onRecalculate={handleRecalculateScore}
-                onNavigateTab={setActiveTab}
+                readinessScore={readinessScore}
+                activeTab={activeTab}
+                setActiveTab={setActiveTab}
                 onOpenProfile={() => setIsProfileDrawerOpen(true)}
-                isRecalculating={isRecalculatingScore}
-                dashboardData={dashboardData}
-                onRefreshDashboard={fetchDashboardData}
+                onLogout={() => setIsLogoutModalOpen(true)}
+                onCloseMobileDrawer={() => setIsMobileDrawerOpen(false)}
               />
-            )}
-
-            {activeTab === "jobs" && user && (
-              <AiJobRoleRecommendations
-                user={user}
-                onUserUpdate={(updatedUser) => {
-                  setUser(updatedUser);
-                  if (updatedUser.selectedRole) {
-                    fetchRoadmap(updatedUser.selectedRole);
-                  }
-                  fetchDashboardData();
-                }}
-                onNavigateToRoadmap={() => {
-                  if (user?.selectedRole) {
-                    fetchRoadmap(user.selectedRole);
-                  }
-                  setActiveTab("roadmap");
-                }}
-              />
-            )}
-
-            {activeTab === "roadmap" && user && (
-              <RoadmapView
-                roadmap={currentRoadmap}
-                selectedRole={user.selectedRole || undefined}
-                onSelectRole={(role) => {
-                  fetchRoadmap(role);
-                }}
-                onToggleItem={handleToggleRoadmapItem}
-                onRegenerate={() => fetchRoadmap(user?.selectedRole, true)}
-                loading={loadingRoadmap}
-                user={user}
-                onNavigateToRoles={() => setActiveTab("jobs")}
-              />
-            )}
-
-            {activeTab === "interview" && user && (
-              <MockInterviewRoom
-                user={user}
-                roadmap={currentRoadmap}
-                onInterviewComplete={handleInterviewComplete}
-                onNavigateTab={setActiveTab}
-              />
-            )}
+            </div>
           </div>
-        </main>
+        )}
+
+        {/* Main Application Area */}
+        <div className="flex-1 flex flex-col min-w-0 min-h-screen">
+          {/* Top Application Header */}
+          <AppHeader
+            user={user}
+            readinessScore={readinessScore}
+            activeTab={activeTab}
+            onToggleSidebar={() => setIsMobileDrawerOpen((prev) => !prev)}
+            onOpenProfile={() => setIsProfileDrawerOpen(true)}
+            onOpenAuth={(mode) => handleOpenAuth(mode || "register")}
+          />
+
+          {/* Main Content Area */}
+          <main className="flex-1 max-w-7xl w-full mx-auto p-4 sm:p-6 lg:p-8 pb-28 lg:pb-12">
+            <div>
+              {activeTab === "score" && user && (
+                <ScoreDashboard
+                  user={user}
+                  score={readinessScore}
+                  onRecalculate={handleRecalculateScore}
+                  onNavigateTab={setActiveTab}
+                  onOpenProfile={() => setIsProfileDrawerOpen(true)}
+                  isRecalculating={isRecalculatingScore}
+                  dashboardData={dashboardData}
+                  onRefreshDashboard={fetchDashboardData}
+                />
+              )}
+
+              {activeTab === "jobs" && user && (
+                <AiJobRoleRecommendations
+                  user={user}
+                  onUserUpdate={(updatedUser) => {
+                    setUser(updatedUser);
+                    if (updatedUser.selectedRole) {
+                      fetchRoadmap(updatedUser.selectedRole);
+                    }
+                    fetchDashboardData();
+                  }}
+                  onNavigateToRoadmap={() => {
+                    if (user?.selectedRole) {
+                      fetchRoadmap(user.selectedRole);
+                    }
+                    setActiveTab("roadmap");
+                  }}
+                />
+              )}
+
+              {activeTab === "roadmap" && user && (
+                <RoadmapView
+                  roadmap={currentRoadmap}
+                  selectedRole={user.selectedRole || undefined}
+                  onSelectRole={(role) => {
+                    fetchRoadmap(role);
+                  }}
+                  onToggleItem={handleToggleRoadmapItem}
+                  onRegenerate={() => fetchRoadmap(user?.selectedRole, true)}
+                  loading={loadingRoadmap}
+                  user={user}
+                  onNavigateToRoles={() => setActiveTab("jobs")}
+                />
+              )}
+
+              {activeTab === "interview" && user && (
+                <MockInterviewRoom
+                  user={user}
+                  roadmap={currentRoadmap}
+                  onInterviewComplete={handleInterviewComplete}
+                  onNavigateTab={setActiveTab}
+                  onActiveStateChange={setIsInterviewActive}
+                  onOpenProfile={() => setIsProfileDrawerOpen(true)}
+                />
+              )}
+            </div>
+          </main>
+
+          {/* Mobile Bottom Navigation Bar (320px - 1023px) - Hidden during active real-time interview */}
+          {!isInterviewActive && (
+            <MobileBottomNav
+              user={user}
+              activeTab={activeTab}
+              setActiveTab={setActiveTab}
+              onOpenProfile={() => setIsProfileDrawerOpen(true)}
+            />
+          )}
+        </div>
 
         {/* Auth & Registration Modal */}
         <AuthModal

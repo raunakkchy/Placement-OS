@@ -308,9 +308,12 @@ export interface InterviewQuestion {
   questionNumber: number;
   category: "Technical" | "System Design" | "DSA" | "Project Deep-Dive" | "CS Fundamentals" | "Behavioral" | "Problem-Solving" | "Role-Specific" | string;
   question: string;
+  questionType?: "conceptual" | "follow-up" | "deep-dive" | "scenario" | "clarification" | "project" | "coding/algorithmic" | string;
   skill?: string;
   topic?: string;
   difficulty?: "Beginner" | "Intermediate" | "Advanced";
+  reasonForAsking?: string;
+  expectedSkill?: string;
   whatInterviewerIsLookingFor: string;
   timeLimitSeconds: number;
 }
@@ -320,7 +323,7 @@ export interface InterviewQuestionReview {
   question: string;
   category: "Technical" | "System Design" | "DSA" | "Project Deep-Dive" | "CS Fundamentals" | "Behavioral" | "Problem-Solving" | "Role-Specific" | string;
   studentAnswer: string;
-  score: number;
+  score: number | null;
   interviewerCritique: string;
   modelAnswerKey: string;
   strengths: string[];
@@ -330,6 +333,20 @@ export interface InterviewQuestionReview {
   difficulty?: "Beginner" | "Intermediate" | "Advanced";
 }
 
+export interface InterviewSubScores {
+  technicalKnowledge: number | null;
+  problemSolving: number | null;
+  communication: number | null;
+  accuracy: number | null;
+  depthOfUnderstanding: number | null;
+  roleRelevance: number | null;
+  communicationClarity?: number | null;
+  confidencePacing?: number | null;
+  roleAlignment?: number | null;
+  roleKnowledge?: number | null;
+  answerQuality?: number | null;
+}
+
 export interface InterviewReport {
   id: string;
   userId: string;
@@ -337,15 +354,7 @@ export interface InterviewReport {
   companyTarget?: string;
   overallScore: number | null;
   scoreAssessed?: boolean;
-  subScores: {
-    technicalKnowledge: number;
-    problemSolving: number;
-    communicationClarity: number;
-    confidencePacing?: number;
-    roleAlignment: number;
-    roleKnowledge?: number;
-    answerQuality?: number;
-  };
+  subScores: InterviewSubScores;
   durationMinutes: number;
   questionsCount: number;
   questionReviews: InterviewQuestionReview[];

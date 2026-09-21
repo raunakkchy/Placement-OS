@@ -616,7 +616,7 @@ export const ProfileDrawer: React.FC<ProfileDrawerProps> = ({
           <div className="flex items-center gap-3 min-w-0">
             {/* Avatar */}
             <div className="relative group shrink-0">
-              <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-indigo-600 text-white font-bold text-base shadow-xs overflow-hidden">
+              <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-gradient-to-tr from-[#2E5BFF] via-[#2F54EB] to-[#1C3ED8] text-white font-bold text-base shadow-xs overflow-hidden">
                 {profilePhoto ? (
                   <img
                     src={profilePhoto}
@@ -631,7 +631,7 @@ export const ProfileDrawer: React.FC<ProfileDrawerProps> = ({
               <button
                 type="button"
                 onClick={() => photoInputRef.current?.click()}
-                className="absolute -bottom-1 -right-1 flex h-5 w-5 items-center justify-center rounded-full bg-slate-900 text-white shadow hover:bg-indigo-600 transition-colors"
+                className="absolute -bottom-1 -right-1 flex h-5 w-5 items-center justify-center rounded-full bg-slate-900 text-white shadow hover:bg-[#2F54EB] transition-colors"
                 title="Update Profile Photo"
                 aria-label="Update Profile Photo"
               >
@@ -690,14 +690,14 @@ export const ProfileDrawer: React.FC<ProfileDrawerProps> = ({
         </div>
 
         {/* Real-time AI Notice */}
-        <div className="bg-indigo-50/70 border-b border-indigo-100 px-6 py-2.5 flex items-center justify-between text-xs text-indigo-900 shrink-0">
+        <div className="bg-orange-50/70 border-b border-orange-100/80 px-6 py-2.5 flex items-center justify-between text-xs text-orange-950 shrink-0">
           <div className="flex items-center gap-2">
-            <Sparkles className="h-4 w-4 text-indigo-600 shrink-0" />
+            <Sparkles className="h-4 w-4 text-[#FF5A36] shrink-0" />
             <span className="font-medium text-[11px] leading-tight">
               Placement AI analysis and readiness scores synchronize automatically with your verified academic profile.
             </span>
           </div>
-          <span className="shrink-0 rounded-full bg-indigo-100 px-2 py-0.5 text-[10px] font-bold text-indigo-800">
+          <span className="shrink-0 rounded-full bg-orange-100 px-2 py-0.5 text-[10px] font-bold text-[#FF5A36]">
             Real-Time Engine
           </span>
         </div>
@@ -714,7 +714,7 @@ export const ProfileDrawer: React.FC<ProfileDrawerProps> = ({
                 onClick={() => setActiveTab(tab.key)}
                 className={`flex items-center gap-1.5 py-3 px-2 border-b-2 text-xs font-semibold whitespace-nowrap transition-colors ${
                   isActive
-                    ? "border-indigo-600 text-indigo-600 font-bold"
+                    ? "border-[#FF5A36] text-[#FF5A36] font-bold"
                     : "border-transparent text-slate-500 hover:text-slate-800"
                 }`}
               >
@@ -1791,7 +1791,7 @@ export const ProfileDrawer: React.FC<ProfileDrawerProps> = ({
               type="button"
               onClick={handleSaveAll}
               disabled={loading}
-              className="flex items-center gap-1.5 rounded-xl bg-indigo-600 px-5 py-2 text-xs font-bold text-white hover:bg-indigo-700 shadow-sm disabled:opacity-50 transition-all"
+              className="flex items-center gap-1.5 rounded-xl bg-[#FF5A36] px-5 py-2 text-xs font-bold text-white hover:bg-[#e04825] shadow-xs disabled:opacity-50 transition-all"
             >
               {loading ? (
                 <>
