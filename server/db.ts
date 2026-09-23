@@ -107,6 +107,7 @@ export interface UserDocument {
   skills: string[];
   targetRoles: string[];
   selectedRole?: string;
+  roleSelectedAt?: string;
   aiJobRecommendations?: StudentAiRecommendations;
   resumeText?: string;
   resumeFileName?: string;
@@ -355,6 +356,7 @@ const UserSchema = new Schema<UserDocument>(
     skills: [{ type: String }],
     targetRoles: [{ type: String }],
     selectedRole: { type: String },
+    roleSelectedAt: { type: String },
     aiJobRecommendations: { type: Schema.Types.Mixed },
     resumeText: { type: String },
     resumeFileName: { type: String },

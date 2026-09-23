@@ -1,6 +1,7 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useMemo } from "react";
 import { User, ReadinessScore, DashboardData } from "../types";
 import { getAuthHeaders } from "../services/auth";
+import { useTimeBasedGreeting, formatRelativeTime } from "../utils/timeUtils";
 import {
   Compass,
   CheckCircle2,
@@ -146,6 +147,122 @@ export const ScoreDashboard: React.FC<ScoreDashboardProps> = ({
     year: "numeric",
   });
 
+  // Dynamic time-based greeting (Good morning / afternoon / evening / night)
+  const greeting = useTimeBasedGreeting();
+
+  // ----------------------------------------------------
+  // REAL RECENT ACTIVITIES (FROM MONGO EVENT TIMESTAMPS)
+  // ----------------------------------------------------
+  const realActivities = useMemo(() => {
+    // If backend provided recentActivities, use them
+    if (data?.recentActivities && data.recentActivities.length > 0) {
+      return data.recentActivities.slice(0, 5);
+    }
+
+    // Fallback: collect real events from loaded data and user without inventing timestamps
+    const list: Array<{
+      id: string;
+      type: "interview" | "roadmap" | "skill_gap" | "role" | "profile" | "resume";
+      title: string;
+      timestamp: string | null;
+    }> = [];
+
+    if (data?.latestInterview?.conductedAt) {
+      list.push({
+        id: `interview-${data.latestInterview.id || "latest"}`,
+        type: "interview",
+        title: data.latestInterview.targetRole
+          ? `Mock interview completed for ${data.latestInterview.targetRole}`
+          : "Mock interview completed",
+        timestamp: data.latestInterview.conductedAt,
+      });
+    }
+
+    if (data?.latestRoadmapUpdate?.updatedAt) {
+      list.push({
+        id: "roadmap-update",
+        type: "roadmap",
+        title: selectedRoleName ? `Roadmap updated for ${selectedRoleName}` : "Roadmap updated",
+        timestamp: data.latestRoadmapUpdate.updatedAt,
+      });
+    }
+
+    if (user.resumeUploadedAt) {
+      list.push({
+        id: "resume-upload",
+        type: "resume",
+        title: user.resumeFileName ? `Resume uploaded: ${user.resumeFileName}` : "Resume updated",
+        timestamp: user.resumeUploadedAt,
+      });
+    }
+
+    if (user.selectedRole) {
+      list.push({
+        id: "role-selection",
+        type: "role",
+        title: `Target role selected: ${user.selectedRole}`,
+        timestamp: (user as any).roleSelectedAt || null,
+      });
+    }
+
+    if (user.updatedAt || user.createdAt) {
+      list.push({
+        id: "profile-update",
+        type: "profile",
+        title: "Profile updated",
+        timestamp: user.updatedAt || user.createdAt,
+      });
+    }
+
+    return list.sort((a, b) => {
+      const timeA = a.timestamp ? new Date(a.timestamp).getTime() : 0;
+      const timeB = b.timestamp ? new Date(b.timestamp).getTime() : 0;
+      return timeB - timeA;
+    }).slice(0, 5);
+  }, [data, user, selectedRoleName]);
+
+  const getActivityIcon = (type: string) => {
+    switch (type) {
+      case "interview":
+        return (
+          <div className="flex h-7 w-7 sm:h-8 sm:w-8 items-center justify-center rounded-full bg-purple-50 text-purple-600 shrink-0">
+            <Video className="h-4 w-4" />
+          </div>
+        );
+      case "roadmap":
+        return (
+          <div className="flex h-7 w-7 sm:h-8 sm:w-8 items-center justify-center rounded-full bg-emerald-50 text-emerald-600 shrink-0">
+            <CheckCircle2 className="h-4 w-4" />
+          </div>
+        );
+      case "skill_gap":
+        return (
+          <div className="flex h-7 w-7 sm:h-8 sm:w-8 items-center justify-center rounded-full bg-indigo-50 text-indigo-600 shrink-0">
+            <Sparkles className="h-4 w-4" />
+          </div>
+        );
+      case "role":
+        return (
+          <div className="flex h-7 w-7 sm:h-8 sm:w-8 items-center justify-center rounded-full bg-amber-50 text-amber-600 shrink-0">
+            <Briefcase className="h-4 w-4" />
+          </div>
+        );
+      case "resume":
+        return (
+          <div className="flex h-7 w-7 sm:h-8 sm:w-8 items-center justify-center rounded-full bg-sky-50 text-sky-600 shrink-0">
+            <FileText className="h-4 w-4" />
+          </div>
+        );
+      case "profile":
+      default:
+        return (
+          <div className="flex h-7 w-7 sm:h-8 sm:w-8 items-center justify-center rounded-full bg-blue-50 text-[#2F54EB] shrink-0">
+            <UserIcon className="h-4 w-4" />
+          </div>
+        );
+    }
+  };
+
   return (
     <div className="space-y-6 max-w-7xl mx-auto pb-10">
       {/* ========================================================== */}
@@ -154,7 +271,7 @@ export const ScoreDashboard: React.FC<ScoreDashboardProps> = ({
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
           <h1 className="text-2xl sm:text-3xl font-extrabold text-slate-900 tracking-tight flex items-center gap-2">
-            Good morning, {user.fullName.split(" ")[0]} <span>👋</span>
+            {greeting}, {user.fullName.split(" ")[0] || user.fullName} <span>👋</span>
           </h1>
           <p className="text-xs sm:text-sm text-slate-500 mt-1 font-medium">
             Keep going! Every step brings you closer to your dream job.
@@ -489,41 +606,25 @@ export const ScoreDashboard: React.FC<ScoreDashboardProps> = ({
           </div>
 
           <div className="space-y-2.5">
-            <div className="flex items-center justify-between text-xs">
-              <div className="flex items-center gap-2.5">
-                <div className="flex h-7 w-7 items-center justify-center rounded-full bg-emerald-50 text-emerald-600 shrink-0">
-                  <CheckCircle2 className="h-4 w-4" />
+            {realActivities.length > 0 ? (
+              realActivities.map((act) => (
+                <div key={act.id} className="flex items-center justify-between text-xs gap-2">
+                  <div className="flex items-center gap-2.5 min-w-0">
+                    {getActivityIcon(act.type)}
+                    <span className="font-medium text-slate-800 text-[11px] truncate">
+                      {act.title}
+                    </span>
+                  </div>
+                  <span className="text-[10px] text-slate-400 font-medium shrink-0">
+                    {formatRelativeTime(act.timestamp)}
+                  </span>
                 </div>
-                <span className="font-medium text-slate-800 text-[11px]">
-                  Roadmap updated for {selectedRoleName}
-                </span>
+              ))
+            ) : (
+              <div className="text-center py-3 text-[11px] text-slate-400 font-medium">
+                No recent activity recorded yet.
               </div>
-              <span className="text-[10px] text-slate-400">2 hours ago</span>
-            </div>
-
-            <div className="flex items-center justify-between text-xs">
-              <div className="flex items-center gap-2.5">
-                <div className="flex h-7 w-7 items-center justify-center rounded-full bg-purple-50 text-purple-600 shrink-0">
-                  <Video className="h-4 w-4" />
-                </div>
-                <span className="font-medium text-slate-800 text-[11px]">
-                  Mock interview completed
-                </span>
-              </div>
-              <span className="text-[10px] text-slate-400">1 day ago</span>
-            </div>
-
-            <div className="flex items-center justify-between text-xs">
-              <div className="flex items-center gap-2.5">
-                <div className="flex h-7 w-7 items-center justify-center rounded-full bg-blue-50 text-blue-600 shrink-0">
-                  <UserIcon className="h-4 w-4" />
-                </div>
-                <span className="font-medium text-slate-800 text-[11px]">
-                  Profile updated
-                </span>
-              </div>
-              <span className="text-[10px] text-slate-400">2 days ago</span>
-            </div>
+            )}
           </div>
         </div>
       </div>
@@ -1057,48 +1158,26 @@ export const ScoreDashboard: React.FC<ScoreDashboardProps> = ({
               </button>
             </div>
 
-            <div className="space-y-4">
-              <div className="flex items-center justify-between text-xs">
-                <div className="flex items-center gap-3">
-                  <div className="flex h-8 w-8 items-center justify-center rounded-full bg-emerald-50 text-emerald-600 shrink-0">
-                    <CheckCircle2 className="h-4.5 w-4.5" />
+            <div className="space-y-3.5">
+              {realActivities.length > 0 ? (
+                realActivities.map((act) => (
+                  <div key={act.id} className="flex items-center justify-between text-xs gap-3">
+                    <div className="flex items-center gap-3 min-w-0">
+                      {getActivityIcon(act.type)}
+                      <span className="font-semibold text-slate-800 text-xs truncate">
+                        {act.title}
+                      </span>
+                    </div>
+                    <span className="text-[11px] text-slate-400 font-medium shrink-0">
+                      {formatRelativeTime(act.timestamp)}
+                    </span>
                   </div>
-                  <span className="font-semibold text-slate-800 text-xs">
-                    Roadmap updated for {selectedRoleName}
-                  </span>
+                ))
+              ) : (
+                <div className="text-center py-4 text-xs text-slate-400 font-medium">
+                  No recent activity recorded yet.
                 </div>
-                <span className="text-[11px] text-slate-400 font-medium">
-                  2 hours ago
-                </span>
-              </div>
-
-              <div className="flex items-center justify-between text-xs">
-                <div className="flex items-center gap-3">
-                  <div className="flex h-8 w-8 items-center justify-center rounded-full bg-purple-50 text-purple-600 shrink-0">
-                    <Video className="h-4.5 w-4.5" />
-                  </div>
-                  <span className="font-semibold text-slate-800 text-xs">
-                    Mock interview completed
-                  </span>
-                </div>
-                <span className="text-[11px] text-slate-400 font-medium">
-                  1 day ago
-                </span>
-              </div>
-
-              <div className="flex items-center justify-between text-xs">
-                <div className="flex items-center gap-3">
-                  <div className="flex h-8 w-8 items-center justify-center rounded-full bg-blue-50 text-[#2F54EB] shrink-0">
-                    <UserIcon className="h-4.5 w-4.5" />
-                  </div>
-                  <span className="font-semibold text-slate-800 text-xs">
-                    Profile updated
-                  </span>
-                </div>
-                <span className="text-[11px] text-slate-400 font-medium">
-                  2 days ago
-                </span>
-              </div>
+              )}
             </div>
           </div>
 

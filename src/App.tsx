@@ -305,9 +305,9 @@ export default function App() {
     }
 
     return (
-      <div className="min-h-screen bg-[#F4F6FB] text-slate-900 flex font-sans selection:bg-[#2F54EB] selection:text-white antialiased">
-        {/* Persistent Left Sidebar on Desktop (1024px+) */}
-        <div className="hidden lg:block shrink-0 sticky top-0 h-screen z-30">
+      <div className="min-h-screen lg:h-screen lg:overflow-hidden bg-[#F4F6FB] text-slate-900 flex font-sans selection:bg-[#2F54EB] selection:text-white antialiased">
+        {/* Persistent Left Sidebar on Desktop (1024px+) - Fixed 100vh viewport height */}
+        <div className="hidden lg:block shrink-0 h-screen z-30 select-none">
           <AppSidebar
             user={user}
             readinessScore={readinessScore}
@@ -339,8 +339,8 @@ export default function App() {
           </div>
         )}
 
-        {/* Main Application Area */}
-        <div className="flex-1 flex flex-col min-w-0 min-h-screen">
+        {/* Main Application Area - Independently scrollable on desktop */}
+        <div className="flex-1 flex flex-col min-w-0 min-h-screen lg:min-h-0 lg:h-screen lg:overflow-y-auto">
           {/* Top Application Header */}
           <AppHeader
             user={user}

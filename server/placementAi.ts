@@ -1431,7 +1431,8 @@ export function buildStudentInterviewContext(
   student: UserDocument,
   targetRole: string,
   roadmap?: RoadmapDocument,
-  skillGap?: SkillGapAnalysis
+  skillGap?: SkillGapAnalysis,
+  previousInterviews?: InterviewDocument[]
 ) {
   // 1. Stated skills + skill levels
   let skillsContext = "";
@@ -1484,6 +1485,26 @@ export function buildStudentInterviewContext(
     ).join("\n");
   }
 
+  // 7. Previous Interview Evidence & Weaknesses (for Practice Again / adaptive growth)
+  let previousInterviewContext = "Previous Mock Interviews: None (First attempt)";
+  if (previousInterviews && previousInterviews.length > 0) {
+    const latest = previousInterviews[0];
+    const prevWeaknesses = latest.coreWeaknesses?.length ? latest.coreWeaknesses.join("; ") : "None recorded";
+    const prevStrengths = latest.coreStrengths?.length ? latest.coreStrengths.join("; ") : "None recorded";
+    const prevScore = latest.scoreAssessed !== false && latest.overallScore !== null ? `${latest.overallScore}/100` : "Not Assessed";
+    
+    const prevQuestionsAsked = previousInterviews.flatMap(i => i.questionReviews?.map(qr => qr.question) || []).slice(0, 15);
+
+    previousInterviewContext = `
+Previous Completed Mock Sessions: ${previousInterviews.length}
+Most Recent Mock Score: ${prevScore}
+Documented Weaknesses from Previous Session: ${prevWeaknesses}
+Demonstrated Strengths from Previous Session: ${prevStrengths}
+Previously Asked Questions (DO NOT REPEAT IDENTICAL QUESTIONS):
+${prevQuestionsAsked.length > 0 ? prevQuestionsAsked.map((q, idx) => `  ${idx + 1}. "${q}"`).join("\n") : "  None"}
+`;
+  }
+
   const candidateSummary = `
 Candidate Name: ${student.fullName}
 Degree / Branch: ${student.course} in ${student.branch} (Semester ${student.semester}, CGPA ${student.cgpa})
@@ -1499,6 +1520,8 @@ Resume Context:
 ${resumeContext}
 Personalized Learning Roadmap:
 ${roadmapContext}
+Previous Mock Interview History:
+${previousInterviewContext}
 `;
 
   return { candidateSummary };
@@ -1509,7 +1532,8 @@ export async function generateInterviewGreetingAndFirstQuestion(
   targetRole: string,
   companyTarget: string = "",
   roadmap?: RoadmapDocument,
-  skillGap?: SkillGapAnalysis
+  skillGap?: SkillGapAnalysis,
+  previousInterviews?: InterviewDocument[]
 ): Promise<{
   interviewerIntro: string;
   firstQuestion: {
@@ -1524,7 +1548,7 @@ export async function generateInterviewGreetingAndFirstQuestion(
   };
   targetRole: string;
 }> {
-  const { candidateSummary } = buildStudentInterviewContext(student, targetRole, roadmap, skillGap);
+  const { candidateSummary } = buildStudentInterviewContext(student, targetRole, roadmap, skillGap, previousInterviews);
 
   const prompt = `You are Dr. Maya Ramanathan, an Executive Technical Bar Raiser conducting an interactive on-campus placement mock interview for the role of "${targetRole}".
 
@@ -1532,12 +1556,13 @@ Candidate Profile & Academic/Skill Context:
 ${candidateSummary}
 
 OBJECTIVES:
-1. Provide a brief, warm yet professional spoken introduction (1-2 sentences) welcoming the candidate and framing the ${targetRole} interview. Keep it concise.
+1. Provide a brief, warm yet professional spoken introduction (1-2 sentences) welcoming the candidate and framing the ${targetRole} interview. If the candidate has taken previous mock interviews, welcome them back to this practice session (e.g. "Welcome back, ${student.fullName}! In this session, we'll build on your previous progress and explore deeper technical dimensions of ${targetRole}...").
 2. Formulate the FIRST interview question. It must be strictly role-specific and tailored to their profile:
    - For a software/frontend engineer with projects, open by asking them to introduce their most technically demanding project and its architecture.
    - For an embedded/hardware engineer, ask about their microcontroller/firmware hands-on experience or memory constraints.
-   - For a role where they have priority skill gaps, pick a foundational question on one of their priority skills or stated core skills.
+   - If they have documented weaknesses from a previous mock interview or priority skill gaps, pick a foundational question testing that area from a fresh practical angle.
    - Ground it strictly in their declared engineering skills or projects.
+   - DO NOT repeat any of the previously asked questions listed in the candidate summary!
 
 Output strictly in JSON matching this exact structure:
 {
@@ -1797,8 +1822,8 @@ function generateDynamicAlgorithmicFollowUp(
   let topic = "Technical Execution";
 
   if (isSilent) {
-    remark = "It looks like you passed on that question. Let's reset and explore a foundational area.";
-    nextQText = `For ${targetRole}, could you explain a core technical concept or tool you feel most confident working with, and walk me through a practical scenario where you used it?`;
+    remark = "Understood. Let's take a breath and explore a foundational concept.";
+    nextQText = `Could you walk me through a core technical concept or tool in ${targetRole} you feel confident working with, and share a practical scenario where you used it?`;
     questionType = "clarification";
     difficulty = "Beginner";
     reasonForAsking = "Candidate was silent on the previous turn; resetting to a foundational confidence-building question.";
@@ -1806,8 +1831,8 @@ function generateDynamicAlgorithmicFollowUp(
   } else if (mentionsProject && student.projects && student.projects.length > 0) {
     // Project follow-up
     const studentProject = student.projects[0];
-    remark = "You highlighted your project experience. Let's delve into the architectural decisions you made.";
-    nextQText = `In your project "${studentProject.title}", what was the single most difficult technical challenge or bottleneck you ran into, and how did you diagnose and resolve it?`;
+    remark = "Got it. That gives me good context on your project background.";
+    nextQText = `In your project "${studentProject.title}", what was the most demanding technical bottleneck you ran into, and how did you diagnose and resolve it?`;
     questionType = "project";
     difficulty = "Intermediate";
     reasonForAsking = "Candidate referenced project work; probing architectural ownership, debugging ability, and technical depth.";
@@ -1817,23 +1842,23 @@ function generateDynamicAlgorithmicFollowUp(
     // Weak/incomplete answer: ask a simpler clarification question, then test from another angle
     difficulty = "Beginner";
     questionType = "clarification";
-    remark = "That covers the surface, but let's break this down into simpler fundamentals.";
-    nextQText = `Let's take a step back on this concept: in simple terms, how does this work under the hood, and what happens when invalid input or an edge case occurs?`;
+    remark = "That's a helpful starting point. Let's break this down into the fundamentals.";
+    nextQText = `Could you explain what happens under the hood here when an unexpected edge case or invalid input occurs?`;
     reasonForAsking = "Candidate gave a brief or hesitant answer; asking a simpler clarification to verify foundational understanding.";
     topic = lastQ?.topic || "Core Principles";
   } else if (isStrong) {
     // Strong answer: increase difficulty, move toward practical/application-based questions
     difficulty = "Advanced";
     questionType = "scenario";
-    remark = "Excellent explanation. That demonstrates solid conceptual clarity. Now let's push the difficulty higher into real-world production constraints.";
-    nextQText = `Suppose your system for ${targetRole} is deployed to production and suddenly receives a 10x traffic spike, causing latency to degrade. How would you systematically profile the bottleneck, and what caching or concurrency patterns would you apply?`;
+    remark = "That's a thorough explanation. Let's push this into real-world production constraints.";
+    nextQText = `Suppose your system for ${targetRole} is deployed to production and suddenly receives a 10x traffic spike. How would you systematically profile the bottleneck, and what caching or concurrency patterns would you apply?`;
     reasonForAsking = "Candidate demonstrated strong conceptual clarity; advancing to production-scale trade-offs and latency optimization.";
     topic = "Scalability, Caching & Performance";
   } else {
     // Natural technical follow-up based on target role
-    remark = "Good response. Now let's see how that applies when working with real-world system constraints.";
+    remark = "Understood. That gives me good context on your approach.";
     if (targetRole.toLowerCase().includes("frontend") || targetRole.toLowerCase().includes("web")) {
-      nextQText = "When state changes frequently in a complex user interface, how do you prevent unnecessary renders and keep animations and interactions running at a smooth 60fps?";
+      nextQText = "When state changes frequently in a complex user interface, how do you prevent unnecessary re-renders and keep animations and interactions running smoothly?";
       topic = "Render Performance & State Optimization";
       expectedSkill = "Frontend Engineering";
     } else if (targetRole.toLowerCase().includes("data") || targetRole.toLowerCase().includes("ai") || targetRole.toLowerCase().includes("ml")) {
@@ -1912,11 +1937,12 @@ export async function evaluateAnswerAndGenerateNextQuestion(
   }[],
   latestAnswer: string,
   roadmap?: RoadmapDocument,
-  skillGap?: SkillGapAnalysis
+  skillGap?: SkillGapAnalysis,
+  previousInterviews?: InterviewDocument[]
 ): Promise<NextQuestionResult> {
   const currentTurn = previousQuestions.length;
   const currentQuestion = previousQuestions[previousQuestions.length - 1];
-  const { candidateSummary } = buildStudentInterviewContext(student, targetRole, roadmap, skillGap);
+  const { candidateSummary } = buildStudentInterviewContext(student, targetRole, roadmap, skillGap, previousInterviews);
 
   // Phase 3 Rule: Adaptive interview of approximately 8–12 meaningful conversational turns
   const isMaxTurnsReached = currentTurn >= 12;
@@ -1949,26 +1975,28 @@ Current Turn: ${currentTurn}
 The candidate just answered Question ${currentTurn} ("${currentQuestion?.question || ""}"):
 "${latestAnswer || "(Blank / Silence)"}"
 
-STRICT ADAPTIVE RULES FOR THIS TURN:
+STRICT ADAPTIVE & CONVERSATIONAL VOICE RULES FOR THIS TURN:
 1. DO NOT simply pick Question ${currentTurn + 1} from a predefined list.
-2. AI should ask natural follow-up questions when appropriate:
+2. AI MUST SPEAK LIKE A REAL HUMAN INTERVIEWER — NOT A VOICE BOT OR SCRIPTED ROBOT:
+   - In "interviewerRemark": Provide a short, natural 1-sentence acknowledgement of the candidate's actual answer showing active listening (e.g. "Got it. You chose MongoDB for flexibility.", "I see, that makes sense for rapid prototyping.", "Right, caching with Redis prevents unnecessary database lookups.").
+   - STRICTLY FORBIDDEN in remark or question: DO NOT write "Next question:", "Question 2:", "Here is your next question:", or repetitive "Okay. Next question."
+   - Formulate questions naturally and conversationally: (e.g. "Could you walk me through how you structured the state management there?", "What trade-offs did you consider when selecting that approach?").
+3. AI should ask natural follow-up questions when appropriate:
    - Example flow:
-     AI: "What is the difference between var, let and const in JavaScript?"
-     Student: "var is function scoped and let is block scoped..."
-     AI: "Good. Now suppose you declare a var inside a for loop. What happens when you access it outside the loop?"
-3. If the student gives a weak or incomplete answer:
-   - Ask a simpler clarification question
-   - Then test the same concept from another angle.
-4. If the student gives a strong answer:
-   - Increase difficulty
-   - Move toward practical/application-based questions and production trade-offs.
-5. If the student mentions a project (e.g. "I built a React project", "In my hospital management system..."):
-   - Ask project-specific follow-up questions (e.g., "What problem did your project solve?", "Why did you choose that tech stack over alternatives?", "How did you manage state / scale / database queries?").
-6. Questions must be strictly relevant to the SELECTED JOB ROLE ("${targetRole}").
-7. DO NOT repeat any question previously asked in the transcript.
-8. DO NOT reveal the question sequence in advance or refer to upcoming questions.
-9. DO NOT invent fake company context. Keep the focus purely on the role "${targetRole}" and actual engineering principles.
-10. Approximate 8–12 meaningful conversational turns:
+     Candidate explains: "I used MongoDB because we needed flexible document schemas."
+     AI: "Got it. You chose MongoDB for flexibility. What made you prefer MongoDB over a relational database for this particular project?"
+4. If the student gives a weak or incomplete answer:
+   - Be patient, neutral and supportive in tone.
+   - Ask a simpler clarification question, then test the same concept from another angle.
+5. If the student gives a strong answer:
+   - Acknowledge their clarity, increase difficulty, and probe practical production trade-offs or concurrency constraints.
+6. If the student mentions a project (e.g. "I built a React project", "In my hospital management system..."):
+   - Ask project-specific follow-up questions probing architectural ownership, bottlenecks, or design trade-offs.
+7. Questions must be strictly relevant to the SELECTED JOB ROLE ("${targetRole}").
+8. DO NOT repeat any question previously asked in the transcript.
+9. DO NOT reveal the question sequence in advance or refer to upcoming questions.
+10. DO NOT invent fake company context. Keep the focus purely on the role "${targetRole}" and actual engineering principles.
+11. Approximate 8–12 meaningful conversational turns:
     - If currentTurn < 8: continueInterview MUST be true.
     - If currentTurn >= 12: continueInterview MUST be false.
     - If 8 <= currentTurn < 12: continueInterview can become false ONLY IF you have gathered thorough evidence across technical depth, problem-solving, and role alignment.
@@ -1990,12 +2018,12 @@ Output strict JSON matching this exact schema:
       "reason": "Struggled to articulate closure retention inside loops."
     }
   },
-  "interviewerRemark": "Good explanation of scope. Now suppose you declare a var inside a for loop. What happens when you access it outside the loop?",
+  "interviewerRemark": "Got it. That gives me good clarity on your scoping approach.",
   "continueInterview": ${!isMaxTurnsReached},
   "nextQuestion": {
     "questionNumber": ${currentTurn + 1},
     "category": "Technical",
-    "question": "Suppose you declare a var inside a for loop. What happens when you access it outside the loop, and how does let change that behavior?",
+    "question": "Suppose you declare a var inside a for loop. Could you walk me through what happens when you access it outside the loop, and how let changes that behavior?",
     "questionType": "follow-up",
     "difficulty": "Intermediate",
     "reasonForAsking": "Candidate previously explained var vs let; testing scoping behavior inside loops to confirm block vs function scope mechanics.",

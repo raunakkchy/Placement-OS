@@ -13,6 +13,7 @@ import {
   Mic,
   MicOff,
   Volume2,
+  VolumeX,
   Sparkles,
   CheckCircle2,
   AlertTriangle,
@@ -38,8 +39,10 @@ import {
   ShieldCheck,
   X,
   FileText,
+  Target,
 } from "lucide-react";
 import confetti from "canvas-confetti";
+import { interviewerVoice, SpeakingContext } from "../services/interviewerVoice";
 
 interface MockInterviewRoomProps {
   user: User;
@@ -112,6 +115,10 @@ export const MockInterviewRoom: React.FC<MockInterviewRoomProps> = ({
   } | null>(null);
   const [timerSeconds, setTimerSeconds] = useState(120);
   const [isSpeakingQuestion, setIsSpeakingQuestion] = useState(false);
+  const [voiceSegment, setVoiceSegment] = useState<"intro" | "remark" | "question" | "idle">("idle");
+  const [activeSpokenText, setActiveSpokenText] = useState<string>("");
+  const [isVoiceMuted, setIsVoiceMuted] = useState(() => interviewerVoice.isMuted());
+  const [voiceAvailable, setVoiceAvailable] = useState(() => interviewerVoice.isSupported());
 
   // Evaluated report & adaptive roadmap notifications
   const [report, setReport] = useState<InterviewReport | null>(null);
@@ -152,10 +159,21 @@ export const MockInterviewRoom: React.FC<MockInterviewRoomProps> = ({
     }
   }, [interviewState]);
 
-  // Clean up camera stream when component unmounts
+  // Clean up camera stream, speech recognition, and speech synthesis when component unmounts
   useEffect(() => {
     return () => {
       stopCamera();
+      interviewerVoice.cancelSpeech();
+      if ("speechSynthesis" in window) {
+        window.speechSynthesis.cancel();
+      }
+      if (recognitionRef.current) {
+        try {
+          recognitionRef.current.abort();
+        } catch (e) {
+          // ignore
+        }
+      }
     };
   }, []);
 
@@ -344,22 +362,84 @@ export const MockInterviewRoom: React.FC<MockInterviewRoomProps> = ({
     return () => clearInterval(timer);
   }, [interviewState, currentQuestionIndex]);
 
-  // Read question out loud with Web Speech API
-  const speakQuestion = (text: string) => {
-    if ("speechSynthesis" in window) {
-      window.speechSynthesis.cancel();
-      const utterance = new SpeechSynthesisUtterance(text);
-      utterance.rate = 0.95;
-      utterance.pitch = 1.0;
-      utterance.onstart = () => setIsSpeakingQuestion(true);
-      utterance.onend = () => setIsSpeakingQuestion(false);
-      utterance.onerror = () => setIsSpeakingQuestion(false);
-      window.speechSynthesis.speak(utterance);
+  // Conversational speech delivery using realistic executive voice engine
+  const deliverInterviewerSpeech = async (options: {
+    intro?: string;
+    remark?: string;
+    question: string;
+    context?: SpeakingContext;
+  }) => {
+    if (isVoiceMuted || !interviewerVoice.isSupported()) {
+      setIsSpeakingQuestion(false);
+      setVoiceSegment("idle");
+      return;
+    }
+
+    try {
+      await interviewerVoice.speakDialogueSequence({
+        intro: options.intro,
+        remark: options.remark,
+        question: options.question,
+        context: options.context || "technical",
+        onStart: () => {
+          setIsSpeakingQuestion(true);
+        },
+        onSegmentChange: (segment, text) => {
+          setVoiceSegment(segment);
+          setActiveSpokenText(text);
+        },
+        onInterrupted: () => {
+          setIsSpeakingQuestion(false);
+          setVoiceSegment("idle");
+          setActiveSpokenText("");
+        },
+        onEnd: () => {
+          setIsSpeakingQuestion(false);
+          setVoiceSegment("idle");
+          setActiveSpokenText("");
+        },
+      });
+    } catch (err) {
+      console.warn("Interviewer voice synthesis warning:", err);
+      setIsSpeakingQuestion(false);
+      setVoiceSegment("idle");
+      setActiveSpokenText("");
     }
   };
 
-  // Real-time voice to text listener
+  const handleInterruptSpeech = () => {
+    interviewerVoice.cancelSpeech();
+    setIsSpeakingQuestion(false);
+    setVoiceSegment("idle");
+    setActiveSpokenText("");
+  };
+
+  const toggleVoiceMute = () => {
+    const nextMuted = interviewerVoice.toggleMuted();
+    setIsVoiceMuted(nextMuted);
+    if (nextMuted) {
+      setIsSpeakingQuestion(false);
+      setVoiceSegment("idle");
+      setActiveSpokenText("");
+    }
+  };
+
+  // Re-read current turn with natural pacing
+  const speakQuestion = (text: string, remark?: string, context?: SpeakingContext) => {
+    deliverInterviewerSpeech({
+      remark,
+      question: text,
+      context: context || "technical",
+    });
+  };
+
+  // Real-time voice to text listener with automatic barge-in
   const toggleSpeechRecognition = () => {
+    // If interviewer is speaking, interrupt voice immediately
+    if (isSpeakingQuestion) {
+      handleInterruptSpeech();
+    }
+
     const SpeechRecognition =
       (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
 
@@ -443,15 +523,16 @@ export const MockInterviewRoom: React.FC<MockInterviewRoomProps> = ({
       setTimerSeconds(data.firstQuestion?.timeLimitSeconds || 120);
       setInterviewState("in_progress");
 
-      // Auto-speak greeting and first question after brief delay
+      // Auto-speak greeting and first question after brief delay with natural conversational pauses
       setTimeout(() => {
         if (data.firstQuestion) {
-          const speech = data.interviewerIntro
-            ? `${data.interviewerIntro}. Question one: ${data.firstQuestion.question}`
-            : data.firstQuestion.question;
-          speakQuestion(speech);
+          deliverInterviewerSpeech({
+            intro: data.interviewerIntro,
+            question: data.firstQuestion.question,
+            context: "opening",
+          });
         }
-      }, 800);
+      }, 700);
     } catch (err: any) {
       setEvaluatingError(err.message || "Failed to start interview");
     } finally {
@@ -461,10 +542,14 @@ export const MockInterviewRoom: React.FC<MockInterviewRoomProps> = ({
 
   // Submit current answer and adaptively fetch next question or conclude
   const handleNextTurn = async (forceConclude: boolean = false) => {
-    // Stop speech synthesis if playing
+    // Stop voice synthesis cleanly
+    interviewerVoice.cancelSpeech();
+    setIsSpeakingQuestion(false);
+    setVoiceSegment("idle");
+    setActiveSpokenText("");
+
     if ("speechSynthesis" in window) {
       window.speechSynthesis.cancel();
-      setIsSpeakingQuestion(false);
     }
     // Stop voice recognition
     if (isSpeechListening && recognitionRef.current) {
@@ -484,6 +569,10 @@ export const MockInterviewRoom: React.FC<MockInterviewRoomProps> = ({
     setAnswers(updatedAnswers);
 
     if (forceConclude || updatedAnswers.length >= 12) {
+      deliverInterviewerSpeech({
+        question: "Thank you for walking me through your experience today. That concludes our interview rounds. Let me compile your detailed evaluation report.",
+        context: "ending",
+      });
       // Direct to final evaluation
       await evaluateInterview(updatedAnswers);
       return;
@@ -531,14 +620,31 @@ export const MockInterviewRoom: React.FC<MockInterviewRoomProps> = ({
         setTimerSeconds(nextQ.timeLimitSeconds || 120);
         setInterviewState("in_progress");
 
-        // Speak remark + next question
+        // Determine context for voice acoustics
+        let turnContext: SpeakingContext = "technical";
+        if (turnResult.answerAssessment) {
+          if (turnResult.answerAssessment.quality === "strong") {
+            turnContext = "strong_answer";
+          } else if (turnResult.answerAssessment.quality === "weak" || turnResult.answerAssessment.quality === "silent") {
+            turnContext = "weak_answer";
+          } else if (turnResult.nextQuestion?.questionType === "follow-up") {
+            turnContext = "follow_up";
+          }
+        }
+
+        // Deliver acknowledgement and next question with natural pause in between
         setTimeout(() => {
-          const speech = turnResult.interviewerRemark
-            ? `${turnResult.interviewerRemark}. Next question: ${nextQ.question}`
-            : nextQ.question;
-          speakQuestion(speech);
-        }, 600);
+          deliverInterviewerSpeech({
+            remark: turnResult.interviewerRemark,
+            question: nextQ.question,
+            context: turnContext,
+          });
+        }, 500);
       } else {
+        deliverInterviewerSpeech({
+          question: "Thank you for walking me through your experience today. That concludes our interview rounds. Let me compile your detailed evaluation report.",
+          context: "ending",
+        });
         await evaluateInterview(updatedAnswers);
       }
     } catch (err: any) {
@@ -602,11 +708,45 @@ export const MockInterviewRoom: React.FC<MockInterviewRoomProps> = ({
     }
   };
 
-  const handleExitInterview = (concludeWithAnswers: boolean) => {
-    setIsConfirmEndOpen(false);
+  const handlePracticeAgain = () => {
+    interviewerVoice.cancelSpeech();
+    setIsSpeakingQuestion(false);
+    setVoiceSegment("idle");
+    setActiveSpokenText("");
+
     if ("speechSynthesis" in window) {
       window.speechSynthesis.cancel();
-      setIsSpeakingQuestion(false);
+    }
+    if (isSpeechListening && recognitionRef.current) {
+      try {
+        recognitionRef.current.stop();
+      } catch (e) {
+        // ignore
+      }
+      setIsSpeechListening(false);
+    }
+    setQuestions([]);
+    setCurrentQuestionIndex(0);
+    setAnswers([]);
+    setCurrentAnswer("");
+    setReport(null);
+    setRoadmapChanges([]);
+    setLatestAssessment(null);
+    setInterviewerRemark(null);
+    setEvaluatingError(null);
+    setSessionId("");
+    setInterviewState("setup");
+  };
+
+  const handleExitInterview = (concludeWithAnswers: boolean) => {
+    setIsConfirmEndOpen(false);
+    interviewerVoice.cancelSpeech();
+    setIsSpeakingQuestion(false);
+    setVoiceSegment("idle");
+    setActiveSpokenText("");
+
+    if ("speechSynthesis" in window) {
+      window.speechSynthesis.cancel();
     }
     if (isSpeechListening && recognitionRef.current) {
       recognitionRef.current.stop();
@@ -629,8 +769,12 @@ export const MockInterviewRoom: React.FC<MockInterviewRoomProps> = ({
   const getAiStateLabel = () => {
     if (interviewState === "thinking") return "Analyzing response";
     if (isSubmittingTurn) return "Preparing next question";
-    if (isSpeechListening) return "Listening";
-    if (isSpeakingQuestion) return "Interviewer speaking";
+    if (isSpeechListening) return "Listening to your answer";
+    if (isSpeakingQuestion) {
+      if (voiceSegment === "remark") return "Interviewer acknowledging";
+      if (voiceSegment === "intro") return "Interviewer introducing round";
+      return "Interviewer speaking";
+    }
     if (interviewState === "in_progress") return "Waiting for answer";
     if (interviewState === "report") return "Interview completed";
     return "Ready";
@@ -1073,7 +1217,7 @@ export const MockInterviewRoom: React.FC<MockInterviewRoomProps> = ({
                   )}
 
                   {/* 6. AI INTERVIEWER PRESENCE INDICATOR (Picture-In-Picture Minimal Badge) */}
-                  <div className="absolute top-3 left-3 z-20 flex items-center gap-2.5 rounded-xl bg-black/75 backdrop-blur-md border border-white/10 p-2 sm:p-2.5 text-white shadow-lg max-w-[280px]">
+                  <div className="absolute top-3 left-3 z-20 flex items-center gap-2.5 rounded-xl bg-black/80 backdrop-blur-md border border-white/10 p-2 sm:p-2.5 text-white shadow-lg max-w-[300px]">
                     <div
                       className={`h-9 w-9 rounded-lg bg-slate-800 border border-white/20 flex items-center justify-center text-xs font-bold text-white shrink-0 transition-all ${
                         isSpeakingQuestion
@@ -1097,42 +1241,84 @@ export const MockInterviewRoom: React.FC<MockInterviewRoomProps> = ({
                               : "bg-slate-400"
                           }`}
                         />
+                        {isSpeakingQuestion && (
+                          <div className="flex items-center gap-0.5 ml-1">
+                            <span className="w-0.5 h-2 bg-emerald-400 animate-pulse rounded-full" />
+                            <span className="w-0.5 h-3.5 bg-emerald-400 animate-pulse rounded-full" />
+                            <span className="w-0.5 h-2 bg-emerald-400 animate-pulse rounded-full" />
+                          </div>
+                        )}
                       </div>
                       <div className="text-[10px] text-slate-300 truncate">
                         {isSpeakingQuestion
-                          ? "Speaking question..."
+                          ? voiceSegment === "remark"
+                            ? "Acknowledging..."
+                            : voiceSegment === "intro"
+                            ? "Introducing round..."
+                            : "Speaking..."
                           : interviewState === "thinking"
                           ? "Analyzing response..."
+                          : isVoiceMuted
+                          ? "Voice muted (Text mode)"
                           : "AI Technical Bar Raiser"}
                       </div>
                     </div>
                   </div>
 
-                  {/* Top-Right: Video Status Badges */}
-                  <div className="absolute top-3 right-3 z-20 flex items-center gap-2">
+                  {/* Top-Right: Video Status & Voice Badges */}
+                  <div className="absolute top-3 right-3 z-20 flex items-center gap-1.5 sm:gap-2">
                     {cameraActive && mediaStream && (
-                      <span className="inline-flex items-center gap-1 rounded-full bg-black/60 backdrop-blur-md border border-white/10 px-2.5 py-1 text-[10px] font-mono font-semibold text-emerald-400">
+                      <span className="hidden sm:inline-flex items-center gap-1 rounded-full bg-black/60 backdrop-blur-md border border-white/10 px-2.5 py-1 text-[10px] font-mono font-semibold text-emerald-400">
                         <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse" />
                         HD 720p
                       </span>
                     )}
 
+                    {/* Voice Mute / Unmute Toggle */}
+                    <button
+                      type="button"
+                      onClick={toggleVoiceMute}
+                      className={`flex items-center gap-1 rounded-full backdrop-blur-md border px-2.5 py-1 text-[10px] font-bold transition-colors cursor-pointer ${
+                        isVoiceMuted
+                          ? "bg-rose-950/80 border-rose-500/40 text-rose-300 hover:bg-rose-900/90"
+                          : "bg-black/60 border-white/10 text-white hover:bg-black/80"
+                      }`}
+                      title={isVoiceMuted ? "Unmute AI Interviewer Voice" : "Mute AI Interviewer Voice"}
+                    >
+                      {isVoiceMuted ? (
+                        <VolumeX className="h-3 w-3 text-rose-400" />
+                      ) : (
+                        <Volume2 className="h-3 w-3 text-emerald-400" />
+                      )}
+                      <span>{isVoiceMuted ? "Muted" : "Voice On"}</span>
+                    </button>
+
+                    {/* Listen again */}
                     <button
                       type="button"
                       onClick={() => {
                         if (currentQ) {
-                          const speech = interviewerRemark
-                            ? `${interviewerRemark}. Question: ${currentQ.question}`
-                            : currentQ.question;
-                          speakQuestion(speech);
+                          speakQuestion(currentQ.question, interviewerRemark || undefined);
                         }
                       }}
-                      className="flex items-center gap-1 rounded-full bg-black/60 backdrop-blur-md border border-white/10 px-2.5 py-1 text-[10px] font-bold text-white hover:bg-black/80 transition-colors"
-                      title="Hear question read aloud"
+                      className="flex items-center gap-1 rounded-full bg-black/60 backdrop-blur-md border border-white/10 px-2.5 py-1 text-[10px] font-bold text-white hover:bg-black/80 transition-colors cursor-pointer"
+                      title="Listen to question read naturally"
                     >
                       <Volume2 className="h-3 w-3 text-white" />
                       <span>{isSpeakingQuestion ? "Speaking..." : "Listen"}</span>
                     </button>
+
+                    {/* Barge-in button when interviewer is speaking */}
+                    {isSpeakingQuestion && (
+                      <button
+                        type="button"
+                        onClick={handleInterruptSpeech}
+                        className="flex items-center gap-1 rounded-full bg-amber-500 hover:bg-amber-600 text-white backdrop-blur-md px-2.5 py-1 text-[10px] font-bold transition-all shadow-md animate-pulse cursor-pointer"
+                        title="Interrupt interviewer and answer now"
+                      >
+                        <span>Interrupt</span>
+                      </button>
+                    )}
                   </div>
 
                   {/* Bottom-Left inside video: Candidate Label */}
@@ -1146,7 +1332,7 @@ export const MockInterviewRoom: React.FC<MockInterviewRoomProps> = ({
                 </div>
 
                 {/* 8. CURRENT QUESTION DISPLAY */}
-                <div className="rounded-2xl bg-white border border-slate-200/90 p-4 sm:p-5 shadow-sm space-y-2">
+                <div className="rounded-2xl bg-white border border-slate-200/90 p-4 sm:p-5 shadow-sm space-y-3">
                   <div className="flex items-center justify-between gap-2 border-b border-slate-100 pb-2">
                     <div className="flex items-center gap-2">
                       <span className="text-[11px] font-black uppercase tracking-wider text-[#FF5A36]">
@@ -1167,6 +1353,45 @@ export const MockInterviewRoom: React.FC<MockInterviewRoomProps> = ({
                     </div>
                   </div>
 
+                  {/* Interviewer Remark / Transition banner if present */}
+                  {interviewerRemark && (
+                    <div className="rounded-xl bg-slate-50 border border-slate-200/80 p-3 text-xs text-slate-700 flex items-start gap-2.5">
+                      <div className="h-5 w-5 rounded-full bg-slate-800 text-white flex items-center justify-center text-[9px] font-bold shrink-0 mt-0.5">
+                        DR
+                      </div>
+                      <div className="min-w-0">
+                        <span className="font-bold text-slate-900">Dr. Maya: </span>
+                        <span className="text-slate-600">{interviewerRemark}</span>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Active speaking indicator with Barge-in action */}
+                  {isSpeakingQuestion && (
+                    <div className="flex items-center justify-between gap-2 p-2.5 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-900 text-xs">
+                      <div className="flex items-center gap-2 min-w-0">
+                        <span className="relative flex h-2 w-2 shrink-0">
+                          <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                          <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+                        </span>
+                        <span className="font-medium text-[11px] truncate">
+                          {voiceSegment === "remark"
+                            ? "Dr. Maya is acknowledging your answer..."
+                            : voiceSegment === "intro"
+                            ? "Dr. Maya is introducing the round..."
+                            : "Dr. Maya is speaking..."}
+                        </span>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={handleInterruptSpeech}
+                        className="text-[11px] font-bold text-amber-800 hover:text-amber-900 bg-amber-100 hover:bg-amber-200 px-2.5 py-1 rounded-lg transition-colors cursor-pointer shrink-0"
+                      >
+                        Interrupt & Answer
+                      </button>
+                    </div>
+                  )}
+
                   <div className="text-sm sm:text-base font-semibold text-slate-900 leading-relaxed">
                     {currentQ ? currentQ.question : "Preparing your next question..."}
                   </div>
@@ -1185,6 +1410,7 @@ export const MockInterviewRoom: React.FC<MockInterviewRoomProps> = ({
                   <div className="flex items-center gap-2">
                     <button
                       type="button"
+                      id="btn-toggle-mic"
                       onClick={toggleMic}
                       className={`flex items-center gap-1.5 rounded-xl px-3.5 py-2 text-xs font-bold transition-all shadow-2xs cursor-pointer ${
                         micActive
@@ -1208,6 +1434,7 @@ export const MockInterviewRoom: React.FC<MockInterviewRoomProps> = ({
 
                     <button
                       type="button"
+                      id="btn-toggle-camera"
                       onClick={toggleCamera}
                       disabled={isRequestingCamera}
                       className={`flex items-center gap-1.5 rounded-xl px-3.5 py-2 text-xs font-bold transition-all shadow-2xs cursor-pointer ${
@@ -1231,46 +1458,86 @@ export const MockInterviewRoom: React.FC<MockInterviewRoomProps> = ({
                     </button>
                   </div>
 
-                  {/* Center Controls: Voice Dictate & Read Aloud */}
-                  <div className="flex items-center gap-2">
+                  {/* Center Controls: Voice Dictate, Speaker, Mute, Barge-in */}
+                  <div className="flex items-center gap-2 flex-wrap">
                     {speechSupported && (
                       <button
                         type="button"
+                        id="btn-dictate-answer"
                         onClick={toggleSpeechRecognition}
                         className={`flex items-center gap-1.5 rounded-xl px-3.5 py-2 text-xs font-bold transition-all shadow-2xs cursor-pointer ${
                           isSpeechListening
                             ? "bg-emerald-600 text-white animate-pulse"
                             : "bg-indigo-50 text-indigo-700 hover:bg-indigo-100 border border-indigo-200"
                         }`}
-                        title="Dictate response via microphone"
+                        title={
+                          isSpeakingQuestion
+                            ? "Interrupt interviewer and dictate response via microphone"
+                            : "Dictate response via microphone"
+                        }
                       >
                         <Sparkles className="h-4 w-4" />
                         <span>{isSpeechListening ? "Listening..." : "Dictate Answer"}</span>
                       </button>
                     )}
 
+                    {/* Mute Voice Toggle */}
                     <button
                       type="button"
+                      id="btn-toggle-voice-mute-bar"
+                      onClick={toggleVoiceMute}
+                      className={`flex items-center gap-1.5 rounded-xl px-3 py-2 text-xs font-semibold border transition-colors cursor-pointer ${
+                        isVoiceMuted
+                          ? "bg-rose-50 text-rose-700 border-rose-200 hover:bg-rose-100"
+                          : "bg-slate-100 text-slate-700 border-slate-200 hover:bg-slate-200"
+                      }`}
+                      title={isVoiceMuted ? "Unmute AI Interviewer Voice" : "Mute AI Interviewer Voice"}
+                    >
+                      {isVoiceMuted ? (
+                        <VolumeX className="h-4 w-4 text-rose-600" />
+                      ) : (
+                        <Volume2 className="h-4 w-4 text-emerald-600" />
+                      )}
+                      <span className="hidden sm:inline">{isVoiceMuted ? "Muted" : "Voice"}</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      id="btn-speak-question-bar"
                       onClick={() => {
                         if (currentQ) {
-                          const speech = interviewerRemark
-                            ? `${interviewerRemark}. Question: ${currentQ.question}`
-                            : currentQ.question;
-                          speakQuestion(speech);
+                          speakQuestion(currentQ.question, interviewerRemark || undefined);
                         }
                       }}
-                      className="flex items-center gap-1.5 rounded-xl px-3 py-2 text-xs font-semibold bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200 transition-colors"
-                      title="Read question"
+                      className="flex items-center gap-1.5 rounded-xl px-3 py-2 text-xs font-semibold bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200 transition-colors cursor-pointer"
+                      title="Read question naturally"
                     >
                       <Volume2 className="h-4 w-4" />
-                      <span className="hidden sm:inline">Speaker</span>
+                      <span className="hidden sm:inline">
+                        {isSpeakingQuestion ? "Speaking..." : "Listen"}
+                      </span>
                     </button>
+
+                    {/* Barge-in direct button */}
+                    {isSpeakingQuestion && (
+                      <button
+                        type="button"
+                        id="btn-barge-in-controls"
+                        onClick={handleInterruptSpeech}
+                        className="flex items-center gap-1.5 rounded-xl px-3.5 py-2 text-xs font-bold bg-amber-500 hover:bg-amber-600 text-white transition-all shadow-xs cursor-pointer animate-pulse"
+                        title="Interrupt interviewer and answer now"
+                      >
+                        <Mic className="h-4 w-4" />
+                        <span>Answer Now</span>
+                      </button>
+                    )}
                   </div>
 
                   {/* Right Control: End Call */}
                   <div className="flex items-center gap-2">
                     <button
                       type="button"
+                      id="btn-end-interview-bar"
                       onClick={() => setIsConfirmEndOpen(true)}
                       className="flex items-center gap-1.5 rounded-xl bg-slate-900 hover:bg-rose-700 text-white px-3.5 py-2 text-xs font-bold transition-colors shadow-2xs cursor-pointer"
                     >
@@ -1377,9 +1644,15 @@ export const MockInterviewRoom: React.FC<MockInterviewRoomProps> = ({
                   </div>
 
                   <textarea
+                    id="interview-response-textarea"
                     rows={5}
                     value={currentAnswer}
-                    onChange={(e) => setCurrentAnswer(e.target.value)}
+                    onChange={(e) => {
+                      if (isSpeakingQuestion) {
+                        handleInterruptSpeech();
+                      }
+                      setCurrentAnswer(e.target.value);
+                    }}
                     placeholder="Speak using microphone or type your response here. Outline your architectural decisions, trade-offs, space/time complexity, or personal project experiences..."
                     className="w-full rounded-xl border border-slate-300 p-3 text-xs text-slate-900 placeholder-slate-400 focus:border-[#FF5A36] focus:ring-1 focus:ring-[#FF5A36] focus:outline-none leading-relaxed font-sans"
                   />
@@ -1387,6 +1660,7 @@ export const MockInterviewRoom: React.FC<MockInterviewRoomProps> = ({
                   <div className="flex flex-col gap-2 pt-1">
                     <button
                       type="button"
+                      id="btn-submit-answer"
                       onClick={() => handleNextTurn(false)}
                       disabled={isSubmittingTurn || interviewState === "thinking"}
                       className="flex w-full items-center justify-center gap-2 rounded-xl bg-[#FF5A36] hover:bg-[#e04825] py-2.5 text-xs font-bold text-white transition-all shadow-xs disabled:opacity-50 cursor-pointer"
@@ -1407,6 +1681,7 @@ export const MockInterviewRoom: React.FC<MockInterviewRoomProps> = ({
                     {canConcludeEarly && (
                       <button
                         type="button"
+                        id="btn-conclude-early"
                         onClick={() => handleNextTurn(true)}
                         disabled={isSubmittingTurn}
                         className="text-[11px] text-slate-500 hover:text-slate-800 text-center font-medium underline py-1 transition-colors cursor-pointer"
@@ -1660,13 +1935,35 @@ export const MockInterviewRoom: React.FC<MockInterviewRoomProps> = ({
             })}
           </div>
 
-          {/* Core Weaknesses & Action Plan */}
+          {/* Evaluated Strengths & Needs Improvement */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            {/* Core Weaknesses */}
+            {/* Strengths - Actual Evidence-Based Strengths */}
+            <div className="rounded-2xl bg-white p-6 border border-slate-200 shadow-sm">
+              <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-emerald-800 mb-3">
+                <CheckCircle2 className="h-4 w-4 text-emerald-600" />
+                Strengths — Evidence-Based Performance
+              </div>
+              <ul className="space-y-2.5 text-xs text-slate-700">
+                {report.coreStrengths && report.coreStrengths.length > 0 ? (
+                  report.coreStrengths.map((s, idx) => (
+                    <li key={idx} className="flex items-start gap-2.5">
+                      <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-emerald-50 text-[10px] font-bold text-emerald-700">
+                        ✓
+                      </span>
+                      <span className="leading-relaxed">{s}</span>
+                    </li>
+                  ))
+                ) : (
+                  <li className="text-slate-400 italic">No specific strengths confirmed from this session.</li>
+                )}
+              </ul>
+            </div>
+
+            {/* Needs Improvement - Actual Weaknesses */}
             <div className="rounded-2xl bg-white p-6 border border-slate-200 shadow-sm">
               <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-rose-700 mb-3">
                 <AlertTriangle className="h-4 w-4 text-rose-600" />
-                Identified Weaknesses & Hesitations
+                Needs Improvement — Technical Weaknesses
               </div>
               <ul className="space-y-2.5 text-xs text-slate-700">
                 {report.coreWeaknesses && report.coreWeaknesses.length > 0 ? (
@@ -1683,12 +1980,42 @@ export const MockInterviewRoom: React.FC<MockInterviewRoomProps> = ({
                 )}
               </ul>
             </div>
+          </div>
 
-            {/* 7-Day Action Plan */}
+          {/* Skills Evaluated & Recommended Next Steps */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            {/* Skills Evaluated */}
+            <div className="rounded-2xl bg-white p-6 border border-slate-200 shadow-sm">
+              <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-slate-800 mb-3">
+                <Target className="h-4 w-4 text-[#FF5A36]" />
+                Skills Evaluated
+              </div>
+              <div className="flex flex-wrap gap-2 pt-1">
+                {Array.from(
+                  new Set(
+                    report.questionReviews
+                      .map((r) => r.skill || r.category)
+                      .filter(Boolean)
+                  )
+                ).map((skillName, idx) => (
+                  <span
+                    key={idx}
+                    className="inline-flex items-center px-3 py-1.5 rounded-lg text-xs font-semibold bg-slate-100 text-slate-800 border border-slate-200"
+                  >
+                    {skillName}
+                  </span>
+                ))}
+              </div>
+              <p className="text-[11px] text-slate-500 mt-3 leading-relaxed">
+                Directly probed through dialogue questions tailored for {report.targetRole}.
+              </p>
+            </div>
+
+            {/* Recommended Next Steps */}
             <div className="rounded-2xl bg-white p-6 border border-slate-200 shadow-sm">
               <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-indigo-700 mb-3">
                 <BookOpen className="h-4 w-4 text-indigo-600" />
-                Personalized Action Plan Before Next Mock
+                Recommended Next Steps
               </div>
               <ul className="space-y-2.5 text-xs text-slate-700">
                 {report.personalizedActionPlan && report.personalizedActionPlan.length > 0 ? (
@@ -1757,21 +2084,35 @@ export const MockInterviewRoom: React.FC<MockInterviewRoomProps> = ({
             ))}
           </div>
 
-          {/* Action Footer */}
-          <div className="flex items-center justify-between pt-4 border-t border-slate-200">
-            <button
-              onClick={() => onNavigateTab("roadmap")}
-              className="rounded-xl border border-indigo-300 bg-indigo-50 text-indigo-700 px-4 py-2 text-xs font-bold hover:bg-indigo-100 cursor-pointer"
-            >
-              ← View Updated Placement Roadmap
-            </button>
+          {/* Action Footer (Requirements 17 & 33) */}
+          <div className="flex flex-wrap items-center justify-between gap-3 pt-6 border-t border-slate-200">
+            <div className="flex flex-wrap items-center gap-2.5">
+              <button
+                type="button"
+                id="btn-back-to-dashboard"
+                onClick={() => onNavigateTab("score")}
+                className="rounded-xl border border-slate-300 bg-white text-slate-700 px-4 py-2.5 text-xs font-bold hover:bg-slate-50 transition-colors shadow-2xs cursor-pointer"
+              >
+                ← Back to Dashboard
+              </button>
+              <button
+                type="button"
+                id="btn-view-roadmap"
+                onClick={() => onNavigateTab("roadmap")}
+                className="rounded-xl border border-indigo-200 bg-indigo-50 text-indigo-700 px-4 py-2.5 text-xs font-bold hover:bg-indigo-100 transition-colors shadow-2xs cursor-pointer"
+              >
+                View Updated Roadmap →
+              </button>
+            </div>
 
             <button
-              onClick={() => setInterviewState("setup")}
-              className="flex items-center gap-1.5 rounded-xl bg-slate-900 px-5 py-2 text-xs font-bold text-white hover:bg-slate-800 shadow cursor-pointer"
+              type="button"
+              id="btn-practice-again"
+              onClick={handlePracticeAgain}
+              className="flex items-center gap-2 rounded-xl bg-slate-900 px-5 py-2.5 text-xs font-bold text-white hover:bg-slate-800 transition-colors shadow-sm cursor-pointer"
             >
               <RotateCcw className="h-3.5 w-3.5" />
-              <span>Retake Interview Practice</span>
+              <span>Practice Again</span>
             </button>
           </div>
         </div>

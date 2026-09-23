@@ -98,6 +98,7 @@ export interface User {
   skills: string[];
   targetRoles: string[];
   selectedRole?: string;
+  roleSelectedAt?: string;
   aiJobRecommendations?: StudentAiRecommendations;
   resumeFileName?: string;
   resumeUploadedAt?: string;
@@ -457,4 +458,12 @@ export interface DashboardData {
     targetTab: "score" | "jobs" | "roadmap" | "interview";
     reason: string;
   };
+  recentActivities?: DashboardActivity[];
+}
+
+export interface DashboardActivity {
+  id: string;
+  type: "profile" | "role" | "skill_gap" | "roadmap" | "interview" | "resume";
+  title: string;
+  timestamp: string | null;
 }

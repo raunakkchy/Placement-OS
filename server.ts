@@ -1547,6 +1547,7 @@ app.post("/api/ai/select-role", requireAuth, async (req: Request, res: Response)
     const updated = await db.users.update(user.id, {
       selectedRole: trimmedRole,
       targetRoles: newTargetRoles,
+      roleSelectedAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     });
 
@@ -2210,6 +2211,85 @@ app.get("/api/dashboard", requireAuth, async (req: Request, res: Response) => {
       };
     }
 
+    // 10. Real Recent Activities from MongoDB event timestamps
+    const recentActivities: Array<{
+      id: string;
+      type: "profile" | "role" | "skill_gap" | "roadmap" | "interview" | "resume";
+      title: string;
+      timestamp: string | null;
+    }> = [];
+
+    // Mock interviews completed
+    if (interviews && interviews.length > 0) {
+      for (const inv of interviews.slice(0, 5)) {
+        if (inv.conductedAt) {
+          recentActivities.push({
+            id: `interview-${inv.id}`,
+            type: "interview",
+            title: inv.targetRole ? `Mock interview completed for ${inv.targetRole}` : "Mock interview completed",
+            timestamp: inv.conductedAt,
+          });
+        }
+      }
+    }
+
+    // Roadmap updated/generated
+    if (roadmap && (roadmap.updatedAt || roadmap.generatedAt)) {
+      recentActivities.push({
+        id: `roadmap-${roadmap.id || "active"}`,
+        type: "roadmap",
+        title: roadmap.selectedRole ? `Roadmap updated for ${roadmap.selectedRole}` : "Roadmap updated",
+        timestamp: roadmap.updatedAt || roadmap.generatedAt,
+      });
+    }
+
+    // Skill gap generated/analyzed
+    if (roadmap?.skillGap?.analyzedAt) {
+      recentActivities.push({
+        id: `skillgap-${roadmap.id || "active"}`,
+        type: "skill_gap",
+        title: roadmap.skillGap.role ? `Skill gap analyzed for ${roadmap.skillGap.role}` : "Skill gap analysis completed",
+        timestamp: roadmap.skillGap.analyzedAt,
+      });
+    }
+
+    // Resume updated/uploaded
+    if (user.resumeUploadedAt) {
+      recentActivities.push({
+        id: `resume-${user.id}`,
+        type: "resume",
+        title: user.resumeFileName ? `Resume uploaded: ${user.resumeFileName}` : "Resume updated",
+        timestamp: user.resumeUploadedAt,
+      });
+    }
+
+    // Target role selected
+    if (user.selectedRole) {
+      recentActivities.push({
+        id: `role-${user.id}`,
+        type: "role",
+        title: `Target role selected: ${user.selectedRole}`,
+        timestamp: user.roleSelectedAt || (roadmap?.generatedAt || null),
+      });
+    }
+
+    // Profile updated/created
+    if (user.updatedAt || user.createdAt) {
+      recentActivities.push({
+        id: `profile-${user.id}`,
+        type: "profile",
+        title: "Profile updated",
+        timestamp: user.updatedAt || user.createdAt,
+      });
+    }
+
+    // Sort by actual event timestamp descending (newest first)
+    recentActivities.sort((a, b) => {
+      const timeA = a.timestamp ? new Date(a.timestamp).getTime() : 0;
+      const timeB = b.timestamp ? new Date(b.timestamp).getTime() : 0;
+      return timeB - timeA;
+    });
+
     res.json({
       targetRole,
       overallProgress: {
@@ -2235,6 +2315,7 @@ app.get("/api/dashboard", requireAuth, async (req: Request, res: Response) => {
       academic,
       resume,
       nextAction,
+      recentActivities,
     });
   } catch (err: any) {
     console.error("Dashboard aggregation error:", err);
@@ -2298,8 +2379,9 @@ app.post("/api/interviews/start", requireAuth, async (req: Request, res: Respons
 
     const existingRoadmap = (await db.roadmaps.findByUserAndJob(user.id, role)) || (await db.roadmaps.findByUser(user.id))[0];
     const skillGap = existingRoadmap?.skillGap;
+    const previousInterviews = await db.interviews.findByUser(user.id);
 
-    const result = await generateInterviewGreetingAndFirstQuestion(user, role, company, existingRoadmap, skillGap);
+    const result = await generateInterviewGreetingAndFirstQuestion(user, role, company, existingRoadmap, skillGap, previousInterviews);
     const sessionId = `session-${user.id}-${Date.now()}`;
 
     res.json({
@@ -2329,6 +2411,7 @@ app.post("/api/interviews/next-question", requireAuth, async (req: Request, res:
     const role = targetRole || user.selectedRole || (user.targetRoles && user.targetRoles[0]) || "Software Development Engineer";
     const existingRoadmap = (await db.roadmaps.findByUserAndJob(user.id, role)) || (await db.roadmaps.findByUser(user.id))[0];
     const skillGap = existingRoadmap?.skillGap;
+    const previousInterviews = await db.interviews.findByUser(user.id);
 
     const turnResult = await evaluateAnswerAndGenerateNextQuestion(
       user,
@@ -2337,7 +2420,8 @@ app.post("/api/interviews/next-question", requireAuth, async (req: Request, res:
       previousAnswers || [],
       latestAnswer || "",
       existingRoadmap,
-      skillGap
+      skillGap,
+      previousInterviews
     );
 
     res.json(turnResult);
