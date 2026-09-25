@@ -324,6 +324,31 @@ export interface SessionDocument {
   expiresAt: string;
 }
 
+export interface PasswordResetDocument {
+  id: string;
+  userId: string;
+  email: string;
+  otpHash: string;
+  expiresAt: Date;
+  attempts: number;
+  verified: boolean;
+  resetTokenHash?: string;
+  resetTokenExpiresAt?: Date;
+  createdAt: Date;
+  usedAt?: Date;
+}
+
+export interface RegistrationOtpDocument {
+  id: string;
+  email: string;
+  otpHash: string;
+  expiresAt: Date;
+  attempts: number;
+  verified: boolean;
+  createdAt: Date;
+  usedAt?: Date;
+}
+
 // ----------------------------------------------------
 // MONGOOSE SCHEMAS & MODELS
 // ----------------------------------------------------
@@ -638,6 +663,55 @@ export const JobModel: Model<JobDocument> = (mongoose.models.Job as Model<JobDoc
 export const RoadmapModel: Model<RoadmapDocument> = (mongoose.models.Roadmap as Model<RoadmapDocument>) || mongoose.model<RoadmapDocument>("Roadmap", RoadmapSchema);
 export const InterviewModel: Model<InterviewDocument> = (mongoose.models.Interview as Model<InterviewDocument>) || mongoose.model<InterviewDocument>("Interview", InterviewSchema);
 export const ReadinessScoreModel: Model<ReadinessScoreDocument> = (mongoose.models.ReadinessScore as Model<ReadinessScoreDocument>) || mongoose.model<ReadinessScoreDocument>("ReadinessScore", ReadinessScoreSchema);
+
+const PasswordResetSchema = new Schema<PasswordResetDocument>(
+  {
+    id: { type: String, required: true, unique: true, index: true },
+    userId: { type: String, required: true, index: true },
+    email: { type: String, required: true, lowercase: true, trim: true, index: true },
+    otpHash: { type: String, required: true },
+    expiresAt: { type: Date, required: true },
+    attempts: { type: Number, default: 0 },
+    verified: { type: Boolean, default: false },
+    resetTokenHash: { type: String, index: true },
+    resetTokenExpiresAt: { type: Date },
+    createdAt: { type: Date, default: Date.now },
+    usedAt: { type: Date },
+  },
+  {
+    versionKey: false,
+  }
+);
+
+PasswordResetSchema.index({ email: 1, createdAt: -1 });
+PasswordResetSchema.index({ expiresAt: 1 }, { expireAfterSeconds: 3600 });
+
+export const PasswordResetModel: Model<PasswordResetDocument> =
+  (mongoose.models.PasswordReset as Model<PasswordResetDocument>) ||
+  mongoose.model<PasswordResetDocument>("PasswordReset", PasswordResetSchema);
+
+const RegistrationOtpSchema = new Schema<RegistrationOtpDocument>(
+  {
+    id: { type: String, required: true, unique: true, index: true },
+    email: { type: String, required: true, lowercase: true, trim: true, index: true },
+    otpHash: { type: String, required: true },
+    expiresAt: { type: Date, required: true },
+    attempts: { type: Number, default: 0 },
+    verified: { type: Boolean, default: false },
+    createdAt: { type: Date, default: Date.now },
+    usedAt: { type: Date },
+  },
+  {
+    versionKey: false,
+  }
+);
+
+RegistrationOtpSchema.index({ email: 1, createdAt: -1 });
+RegistrationOtpSchema.index({ expiresAt: 1 }, { expireAfterSeconds: 3600 });
+
+export const RegistrationOtpModel: Model<RegistrationOtpDocument> =
+  (mongoose.models.RegistrationOtp as Model<RegistrationOtpDocument>) ||
+  mongoose.model<RegistrationOtpDocument>("RegistrationOtp", RegistrationOtpSchema);
 
 // ----------------------------------------------------
 // SANITIZE USER HELPER (Removes Sensitive Fields)
@@ -1333,6 +1407,136 @@ export const db = {
     },
     delete: async (token: string): Promise<void> => {
       await SessionModel.deleteOne({ token }).exec();
+    },
+  },
+
+  // Password Resets
+  passwordResets: {
+    create: async (data: {
+      id: string;
+      userId: string;
+      email: string;
+      otpHash: string;
+      expiresAt: Date;
+    }): Promise<PasswordResetDocument> => {
+      const doc = await PasswordResetModel.create({
+        ...data,
+        attempts: 0,
+        verified: false,
+        createdAt: new Date(),
+      });
+      return doc.toObject() as unknown as PasswordResetDocument;
+    },
+    findLatestActiveByEmail: async (email: string): Promise<PasswordResetDocument | null> => {
+      const doc = await PasswordResetModel.findOne({
+        email: email.toLowerCase().trim(),
+        usedAt: { $exists: false },
+        expiresAt: { $gt: new Date() },
+      })
+        .sort({ createdAt: -1 })
+        .lean()
+        .exec();
+      return doc as unknown as PasswordResetDocument | null;
+    },
+    findLatestByEmail: async (email: string): Promise<PasswordResetDocument | null> => {
+      const doc = await PasswordResetModel.findOne({
+        email: email.toLowerCase().trim(),
+      })
+        .sort({ createdAt: -1 })
+        .lean()
+        .exec();
+      return doc as unknown as PasswordResetDocument | null;
+    },
+    findByResetTokenHash: async (resetTokenHash: string): Promise<PasswordResetDocument | null> => {
+      const doc = await PasswordResetModel.findOne({ resetTokenHash }).lean().exec();
+      return doc as unknown as PasswordResetDocument | null;
+    },
+    incrementAttempts: async (id: string): Promise<PasswordResetDocument | null> => {
+      const updated = await PasswordResetModel.findOneAndUpdate(
+        { id },
+        { $inc: { attempts: 1 } },
+        { new: true }
+      ).lean().exec();
+      return updated as unknown as PasswordResetDocument | null;
+    },
+    markVerified: async (
+      id: string,
+      resetTokenHash: string,
+      resetTokenExpiresAt: Date
+    ): Promise<PasswordResetDocument | null> => {
+      const updated = await PasswordResetModel.findOneAndUpdate(
+        { id },
+        {
+          $set: {
+            verified: true,
+            resetTokenHash,
+            resetTokenExpiresAt,
+          },
+        },
+        { new: true }
+      ).lean().exec();
+      return updated as unknown as PasswordResetDocument | null;
+    },
+    markUsed: async (id: string): Promise<void> => {
+      await PasswordResetModel.updateOne(
+        { id },
+        { $set: { usedAt: new Date() } }
+      ).exec();
+    },
+    deleteActiveByEmail: async (email: string): Promise<void> => {
+      await PasswordResetModel.deleteMany({
+        email: email.toLowerCase().trim(),
+        usedAt: { $exists: false },
+      }).exec();
+    },
+  },
+
+  // Registration OTPs
+  registrationOtps: {
+    create: async (data: {
+      id: string;
+      email: string;
+      otpHash: string;
+      expiresAt: Date;
+    }): Promise<RegistrationOtpDocument> => {
+      const doc = await RegistrationOtpModel.create({
+        ...data,
+        attempts: 0,
+        verified: false,
+        createdAt: new Date(),
+      });
+      return doc.toObject() as unknown as RegistrationOtpDocument;
+    },
+    findLatestActiveByEmail: async (email: string): Promise<RegistrationOtpDocument | null> => {
+      const doc = await RegistrationOtpModel.findOne({
+        email: email.toLowerCase().trim(),
+        usedAt: { $exists: false },
+        expiresAt: { $gt: new Date() },
+      })
+        .sort({ createdAt: -1 })
+        .lean()
+        .exec();
+      return doc as unknown as RegistrationOtpDocument | null;
+    },
+    incrementAttempts: async (id: string): Promise<RegistrationOtpDocument | null> => {
+      const updated = await RegistrationOtpModel.findOneAndUpdate(
+        { id },
+        { $inc: { attempts: 1 } },
+        { new: true }
+      ).lean().exec();
+      return updated as unknown as RegistrationOtpDocument | null;
+    },
+    markUsed: async (id: string): Promise<void> => {
+      await RegistrationOtpModel.updateOne(
+        { id },
+        { $set: { usedAt: new Date(), verified: true } }
+      ).exec();
+    },
+    deleteActiveByEmail: async (email: string): Promise<void> => {
+      await RegistrationOtpModel.deleteMany({
+        email: email.toLowerCase().trim(),
+        usedAt: { $exists: false },
+      }).exec();
     },
   },
 };

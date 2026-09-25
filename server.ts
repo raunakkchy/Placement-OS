@@ -1,3 +1,4 @@
+import "dotenv/config";
 import express, { Request, Response, NextFunction } from "express";
 import path from "path";
 import cookieParser from "cookie-parser";
@@ -5,7 +6,8 @@ import bcrypt from "bcryptjs";
 import crypto from "crypto";
 import multer from "multer";
 import { createServer as createViteServer } from "vite";
-import { db, initMongo, sanitizeUser, UserDocument, RoadmapDocument } from "./server/db.js";
+import { db, initMongo, sanitizeUser, UserDocument, RoadmapDocument, SessionModel } from "./server/db.js";
+import { sendOtpEmail, sendRegistrationOtpEmail } from "./server/email.js";
 import {
   analyzeJobMatch,
   quickJobMatch,
@@ -209,11 +211,163 @@ function checkRateLimit(
   return record.count <= maxAttempts;
 }
 
+// Rate limiting for Forgot Password OTP requests and OTP verification
+interface ForgotPasswordRateLimitRecord {
+  count: number;
+  firstAttempt: number;
+  lastRequestedAt: number;
+}
+const forgotPasswordRateLimit = new Map<string, ForgotPasswordRateLimitRecord>();
+const otpVerifyRateLimit = new Map<string, { count: number; firstAttempt: number }>();
+
+function checkForgotPasswordRateLimit(
+  key: string,
+  cooldownMs = 60 * 1000,
+  maxAttempts = 5,
+  windowMs = 15 * 60 * 1000
+): { allowed: boolean; reason?: "cooldown" | "limit"; retryAfterSeconds?: number } {
+  const now = Date.now();
+  const record = forgotPasswordRateLimit.get(key);
+  if (!record) {
+    forgotPasswordRateLimit.set(key, { count: 1, firstAttempt: now, lastRequestedAt: now });
+    return { allowed: true };
+  }
+
+  // 60-second resend cooldown
+  if (now - record.lastRequestedAt < cooldownMs) {
+    const retryAfterSeconds = Math.ceil((cooldownMs - (now - record.lastRequestedAt)) / 1000);
+    return { allowed: false, reason: "cooldown", retryAfterSeconds };
+  }
+
+  // Window expiry reset
+  if (now - record.firstAttempt > windowMs) {
+    forgotPasswordRateLimit.set(key, { count: 1, firstAttempt: now, lastRequestedAt: now });
+    return { allowed: true };
+  }
+
+  // Attempt limit per window
+  if (record.count >= maxAttempts) {
+    const retryAfterSeconds = Math.ceil((windowMs - (now - record.firstAttempt)) / 1000);
+    return { allowed: false, reason: "limit", retryAfterSeconds };
+  }
+
+  record.count += 1;
+  record.lastRequestedAt = now;
+  return { allowed: true };
+}
+
 // ----------------------------------------------------
 // AUTHENTICATION & SECURITY ENDPOINTS
 // ----------------------------------------------------
 
-// 1. Student Registration
+const registerOtpRateLimit = new Map<string, { count: number; firstAttempt: number; lastRequestedAt: number }>();
+
+// 1. Send Registration OTP
+app.post("/api/auth/send-registration-otp", async (req: Request, res: Response) => {
+  try {
+    const clientIp =
+      (req.headers["x-forwarded-for"] as string)?.split(",")[0]?.trim() ||
+      req.socket.remoteAddress ||
+      "client";
+
+    const { email: rawEmail, fullName, rollNumber } = req.body;
+    const email = (rawEmail || "").toString().trim().toLowerCase();
+
+    if (!email) {
+      res.status(400).json({ error: "Email address is required." });
+      return;
+    }
+
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(email)) {
+      res.status(400).json({ error: "Please enter a valid email address." });
+      return;
+    }
+
+    // 1. Check if user already exists with this email FIRST before rate limiting
+    const existingUser = await db.users.findByEmail(email);
+    if (existingUser) {
+      res.status(409).json({ error: "An account with this email address already exists. Please sign in." });
+      return;
+    }
+
+    // 2. Check if rollNumber is already registered FIRST before rate limiting
+    if (rollNumber && rollNumber.trim()) {
+      const existingRoll = await db.users.findByRollNumber(rollNumber.trim());
+      if (existingRoll) {
+        res.status(409).json({ error: "An account with this Roll / Registration number already exists." });
+        return;
+      }
+    }
+
+    // 3. Rate limiting: max 5 OTP requests per 10 minutes per IP/email
+    const rateKey = `reg-otp:${clientIp}:${email}`;
+    const now = Date.now();
+    const windowMs = 10 * 60 * 1000;
+    const cooldownMs = 60 * 1000;
+
+    let rateRecord = registerOtpRateLimit.get(rateKey);
+    if (!rateRecord || now - rateRecord.firstAttempt > windowMs) {
+      rateRecord = { count: 1, firstAttempt: now, lastRequestedAt: now };
+      registerOtpRateLimit.set(rateKey, rateRecord);
+    } else {
+      if (now - rateRecord.lastRequestedAt < cooldownMs) {
+        const waitSec = Math.ceil((cooldownMs - (now - rateRecord.lastRequestedAt)) / 1000);
+        res.status(429).json({ error: `Please wait ${waitSec} seconds before requesting a new code.` });
+        return;
+      }
+      if (rateRecord.count >= 5) {
+        res.status(429).json({ error: "Too many verification requests. Please try again after 10 minutes." });
+        return;
+      }
+      rateRecord.count += 1;
+      rateRecord.lastRequestedAt = now;
+    }
+
+    // Delete any active unverified OTPs for this email to prevent replay
+    await db.registrationOtps.deleteActiveByEmail(email);
+
+    // Generate cryptographically secure 6-digit OTP (100000 - 999999)
+    const otpNumber = crypto.randomInt(100000, 1000000);
+    const otp = otpNumber.toString();
+
+    // Hash OTP using bcrypt (cost 10)
+    const otpHash = await bcrypt.hash(otp, 10);
+    const expiresAt = new Date(Date.now() + 5 * 60 * 1000); // 5 minutes validity
+    const id = `reg-${crypto.randomBytes(8).toString("hex")}`;
+
+    await db.registrationOtps.create({
+      id,
+      email,
+      otpHash,
+      expiresAt,
+    });
+
+    // Send branded email OTP
+    const sent = await sendRegistrationOtpEmail({
+      to: email,
+      otp,
+      studentName: fullName,
+    });
+
+    if (!sent) {
+      res.status(500).json({
+        error: `Could not deliver verification email to ${email}. Please check the email address or try again.`,
+      });
+      return;
+    }
+
+    res.json({
+      success: true,
+      message: `A 6-digit verification code has been sent to ${email}.`,
+    });
+  } catch (err: any) {
+    console.error("Send registration OTP error:", err);
+    res.status(500).json({ error: "Failed to send verification code: " + err.message });
+  }
+});
+
+// 2. Student Registration (with Compulsory Email OTP Verification)
 app.post("/api/auth/register", async (req: Request, res: Response) => {
   try {
     const clientIp =
@@ -274,6 +428,53 @@ app.post("/api/auth/register", async (req: Request, res: Response) => {
       res.status(400).json({ error: "Please provide a valid email address." });
       return;
     }
+
+    // Compulsory Email OTP Verification check
+    const rawOtp = (req.body.otp || "").toString().trim();
+    if (!rawOtp) {
+      res.status(400).json({
+        error: "Email verification is compulsory to create an account. Please enter the 6-digit OTP sent to your email.",
+        requiresOtp: true,
+      });
+      return;
+    }
+
+    if (!/^\d{6}$/.test(rawOtp)) {
+      res.status(400).json({ error: "Verification code must be exactly 6 digits." });
+      return;
+    }
+
+    const regOtp = await db.registrationOtps.findLatestActiveByEmail(email);
+    if (!regOtp) {
+      res.status(400).json({
+        error: "No active verification code found for this email or it has expired. Please request a new OTP.",
+        otpExpired: true,
+      });
+      return;
+    }
+
+    if (regOtp.attempts >= 5) {
+      await db.registrationOtps.deleteActiveByEmail(email);
+      res.status(400).json({
+        error: "Maximum verification attempts exceeded. Please request a new verification code.",
+        maxAttemptsExceeded: true,
+      });
+      return;
+    }
+
+    await db.registrationOtps.incrementAttempts(regOtp.id);
+
+    const isOtpValid = await bcrypt.compare(rawOtp, regOtp.otpHash);
+    if (!isOtpValid) {
+      const remaining = Math.max(0, 5 - (regOtp.attempts + 1));
+      res.status(400).json({
+        error: `Invalid verification code. ${remaining > 0 ? `${remaining} attempts remaining.` : "Please request a new code."}`,
+      });
+      return;
+    }
+
+    // Mark OTP as used so it cannot be replayed
+    await db.registrationOtps.markUsed(regOtp.id);
 
     // Password strength enforcement
     const hasMinLen = password.length >= 8;
@@ -475,6 +676,178 @@ app.post("/api/auth/login", async (req: Request, res: Response) => {
   }
 });
 
+// ----------------------------------------------------
+// FORGOT PASSWORD WITH SECURE EMAIL OTP VERIFICATION
+// ----------------------------------------------------
+
+// 1. Request OTP
+app.post("/api/auth/forgot-password", async (req: Request, res: Response) => {
+  try {
+    const rawEmail = (req.body?.email || req.body?.identifier || "").trim();
+    const genericResponse = {
+      message: "If an account exists with this email, an OTP has been sent.",
+    };
+
+    if (!rawEmail) {
+      res.status(400).json({ error: "Email address is required." });
+      return;
+    }
+
+    const email = rawEmail.toLowerCase();
+    const clientIp =
+      (req.headers["x-forwarded-for"] as string)?.split(",")[0]?.trim() ||
+      req.socket.remoteAddress ||
+      "client";
+
+    // Rate limiting: IP and email checks
+    const ipCheck = checkForgotPasswordRateLimit(`ip:${clientIp}`);
+    const emailCheck = checkForgotPasswordRateLimit(`email:${email}`);
+
+    if (!ipCheck.allowed || !emailCheck.allowed) {
+      const check = !emailCheck.allowed ? emailCheck : ipCheck;
+      if (check.reason === "cooldown") {
+        // Enforce cooldown without revealing account existence
+        res.json(genericResponse);
+        return;
+      }
+      res.status(429).json({
+        error: "Too many password reset requests. Please try again in a few minutes.",
+      });
+      return;
+    }
+
+    // Check whether account exists in MongoDB
+    const user = await db.users.findByEmail(email);
+
+    if (user) {
+      // Invalidate any existing active OTPs for this email to prevent replay
+      await db.passwordResets.deleteActiveByEmail(email);
+
+      // Generate cryptographically secure 6-digit OTP (100000 - 999999)
+      const otpNumber = crypto.randomInt(100000, 1000000);
+      const otp = otpNumber.toString();
+
+      // Hash OTP using bcrypt before storing in database (cost factor 10)
+      const otpHash = await bcrypt.hash(otp, 10);
+
+      // OTP validity: 5 minutes
+      const expiresAt = new Date(Date.now() + 5 * 60 * 1000);
+      const resetId = `reset-${crypto.randomBytes(8).toString("hex")}`;
+
+      await db.passwordResets.create({
+        id: resetId,
+        userId: user.id,
+        email: user.email,
+        otpHash,
+        expiresAt,
+      });
+
+      // Send OTP via configured server-side email service
+      await sendOtpEmail({
+        to: user.email,
+        otp,
+      });
+    }
+
+    // Always return generic response to prevent email/account enumeration
+    res.json(genericResponse);
+  } catch (err: any) {
+    console.error("Forgot password OTP error:", err);
+    res.status(500).json({ error: "Failed to process password reset request." });
+  }
+});
+
+// 2. Verify OTP
+app.post("/api/auth/verify-reset-otp", async (req: Request, res: Response) => {
+  try {
+    const rawEmail = (req.body?.email || req.body?.identifier || "").trim();
+    const rawOtp = (req.body?.otp || "").toString().trim();
+
+    if (!rawEmail || !rawOtp) {
+      res.status(400).json({ error: "Email and 6-digit OTP are required." });
+      return;
+    }
+
+    const email = rawEmail.toLowerCase();
+    const clientIp =
+      (req.headers["x-forwarded-for"] as string)?.split(",")[0]?.trim() ||
+      req.socket.remoteAddress ||
+      "client";
+
+    const verifyRateKey = `verify:${clientIp}:${email}`;
+    if (!checkRateLimit(otpVerifyRateLimit, verifyRateKey, 15, 15 * 60 * 1000)) {
+      res.status(429).json({ error: "Too many verification attempts. Please wait 15 minutes." });
+      return;
+    }
+
+    // Numeric check for 6-digit OTP
+    if (!/^\d{6}$/.test(rawOtp)) {
+      res.status(400).json({ error: "OTP must be exactly 6 digits." });
+      return;
+    }
+
+    // Find latest active reset record for this email
+    const resetRecord = await db.passwordResets.findLatestActiveByEmail(email);
+
+    if (!resetRecord) {
+      res.status(400).json({ error: "OTP has expired or is invalid. Please request a new OTP." });
+      return;
+    }
+
+    // Check if attempt limit has already been exceeded (max 5 attempts)
+    if (resetRecord.attempts >= 5) {
+      await db.passwordResets.markUsed(resetRecord.id);
+      res.status(400).json({
+        error: "Maximum verification attempts exceeded. Please request a new OTP.",
+      });
+      return;
+    }
+
+    // Compare hashed OTP with input using bcrypt
+    const isMatch = await bcrypt.compare(rawOtp, resetRecord.otpHash);
+
+    if (!isMatch) {
+      const updated = await db.passwordResets.incrementAttempts(resetRecord.id);
+      const attemptsMade = updated ? updated.attempts : resetRecord.attempts + 1;
+      const remaining = Math.max(0, 5 - attemptsMade);
+
+      if (remaining === 0) {
+        await db.passwordResets.markUsed(resetRecord.id);
+        res.status(400).json({
+          error: "Maximum verification attempts exceeded. Please request a new OTP.",
+        });
+        return;
+      }
+
+      res.status(400).json({
+        error: `Invalid OTP. You have ${remaining} attempt(s) remaining.`,
+      });
+      return;
+    }
+
+    // OTP verified successfully!
+    // Generate cryptographically secure reset authorization token (32 random bytes)
+    const resetToken = crypto.randomBytes(32).toString("hex");
+    const resetTokenHash = crypto.createHash("sha256").update(resetToken).digest("hex");
+    const resetTokenExpiresAt = new Date(Date.now() + 15 * 60 * 1000); // 15-minute validity
+
+    await db.passwordResets.markVerified(
+      resetRecord.id,
+      resetTokenHash,
+      resetTokenExpiresAt
+    );
+
+    res.json({
+      success: true,
+      resetToken,
+      message: "OTP verified successfully. You may now create a new password.",
+    });
+  } catch (err: any) {
+    console.error("Verify OTP error:", err);
+    res.status(500).json({ error: "Failed to verify OTP. Please try again." });
+  }
+});
+
 // 3. Security Question Recovery - Step 1: Identify Account
 app.post(["/api/auth/forgot-password/identify", "/api/auth/forgot-password/security-questions"], async (req: Request, res: Response) => {
   try {
@@ -645,19 +1018,35 @@ app.post(["/api/auth/reset-password", "/api/auth/forgot-password/reset-password"
     }
 
     let targetUser: UserDocument | null = null;
+    let resetDocIdToInvalidate: string | null = null;
 
     // Path A: Authenticated via validated resetToken
     if (resetToken && typeof resetToken === "string") {
-      const record = passwordResetTokens.get(resetToken);
-      if (!record || record.expiresAt < Date.now()) {
-        if (record) passwordResetTokens.delete(resetToken);
-        res.status(400).json({
-          error: "Your password reset session has expired or is invalid. Please verify your security questions again.",
-        });
-        return;
+      const resetTokenHash = crypto.createHash("sha256").update(resetToken.trim()).digest("hex");
+      const record = await db.passwordResets.findByResetTokenHash(resetTokenHash);
+
+      if (
+        record &&
+        record.verified &&
+        !record.usedAt &&
+        record.resetTokenExpiresAt &&
+        new Date(record.resetTokenExpiresAt) > new Date()
+      ) {
+        targetUser = await db.users.findById(record.userId);
+        resetDocIdToInvalidate = record.id;
+      } else {
+        // Fallback: Check in-memory legacy tokens for backward compatibility
+        const legacyRecord = passwordResetTokens.get(resetToken);
+        if (legacyRecord && legacyRecord.expiresAt > Date.now()) {
+          targetUser = await db.users.findById(legacyRecord.userId);
+          passwordResetTokens.delete(resetToken);
+        } else {
+          res.status(400).json({
+            error: "Password reset authorization has expired or is invalid. Please request a new OTP.",
+          });
+          return;
+        }
       }
-      targetUser = await db.users.findById(record.userId);
-      passwordResetTokens.delete(resetToken);
     } 
     // Path B: Direct submission with identifier and security answers
     else {
@@ -713,9 +1102,13 @@ app.post(["/api/auth/reset-password", "/api/auth/forgot-password/reset-password"
     const newPasswordHash = await bcrypt.hash(passwordToSet, 10);
     await db.users.update(targetUser.id, { passwordHash: newPasswordHash });
 
+    // Invalidate the reset token authorization record so it cannot be reused
+    if (resetDocIdToInvalidate) {
+      await db.passwordResets.markUsed(resetDocIdToInvalidate);
+    }
+
     // Invalidate all existing sessions for this student account
     try {
-      const { SessionModel } = await import("./server/db.js");
       await SessionModel.deleteMany({ userId: targetUser.id }).exec();
     } catch (sessionErr) {
       console.warn("Could not purge sessions:", sessionErr);

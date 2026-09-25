@@ -12,7 +12,6 @@ import {
   BookOpen,
   FileText,
   RefreshCw,
-  TrendingUp,
   Sparkles,
   ChevronRight,
   GraduationCap,
@@ -48,7 +47,6 @@ export const ScoreDashboard: React.FC<ScoreDashboardProps> = ({
 }) => {
   const [data, setData] = useState<DashboardData | null>(initialDashboardData || null);
   const [loading, setLoading] = useState<boolean>(!initialDashboardData);
-  const [performanceRange, setPerformanceRange] = useState("Last 6 Months");
 
   // Sync when initialDashboardData changes from parent
   useEffect(() => {
@@ -115,30 +113,6 @@ export const ScoreDashboard: React.FC<ScoreDashboardProps> = ({
   // Missing skills count
   const missingSkillsCount = data?.skills?.missing?.length || (matchedJob?.missingSkills?.length ?? 3);
   const needsImprovementCount = data?.skills?.needsImprovement?.length || 2;
-
-  // Skills progress breakdown list
-  const userSkillsList =
-    user.skills && user.skills.length > 0
-      ? user.skills.slice(0, 4)
-      : ["HTML & CSS", "JavaScript", "React", "Python"];
-
-  const skillProgressData = [
-    { name: userSkillsList[0] || "HTML & CSS", percent: 80, color: "#2563EB" },
-    { name: userSkillsList[1] || "JavaScript", percent: 65, color: "#FF5A36" },
-    { name: userSkillsList[2] || "React", percent: 50, color: "#8B5CF6" },
-    { name: userSkillsList[3] || "Python", percent: 40, color: "#06B6D4" },
-    { name: "Others", percent: 20, color: "#94A3B8" },
-  ];
-
-  // Performance bar chart mock values for clean visual rendering matching reference
-  const performanceBars = [
-    { month: "Sep 2024", learning: 35, practice: 55, assessment: 70 },
-    { month: "Oct 2024", learning: 42, practice: 62, assessment: 78 },
-    { month: "Nov 2024", learning: 45, practice: 68, assessment: 85 },
-    { month: "Dec 2024", learning: 48, practice: 70, assessment: 82 },
-    { month: "Jan 2025", learning: 40, practice: 64, assessment: 76 },
-    { month: "Feb 2025", learning: 36, practice: 58, assessment: 72 },
-  ];
 
   // Formatted current date
   const todayFormatted = new Date().toLocaleDateString("en-US", {
@@ -945,143 +919,6 @@ export const ScoreDashboard: React.FC<ScoreDashboardProps> = ({
                   <circle cx="75" cy="20" r="3" fill="#EF4444" />
                   <line x1="75" y1="20" x2="75" y2="28" stroke="#EF4444" strokeWidth="1.5" />
                 </svg>
-              </div>
-            </div>
-          </div>
-
-          {/* Bottom Row: Performance Overview Bar Chart & Skill Progress Donut */}
-          <div className="grid grid-cols-12 gap-6">
-            {/* Performance Overview (8 columns) */}
-            <div className="col-span-8 rounded-3xl bg-white p-6 border border-slate-200/80 shadow-sm space-y-4">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <TrendingUp className="h-5 w-5 text-[#2F54EB]" />
-                  <h3 className="text-base font-bold text-slate-900">
-                    Performance Overview
-                  </h3>
-                </div>
-
-                <select
-                  value={performanceRange}
-                  onChange={(e) => setPerformanceRange(e.target.value)}
-                  className="rounded-full bg-slate-50 border border-slate-200 px-3 py-1 text-xs font-semibold text-slate-700 focus:outline-none"
-                >
-                  <option value="Last 6 Months">Last 6 Months</option>
-                  <option value="Last 3 Months">Last 3 Months</option>
-                  <option value="All Time">All Time</option>
-                </select>
-              </div>
-
-              {/* Grouped Bar Chart */}
-              <div className="pt-4">
-                <div className="flex items-end justify-between h-44 border-b border-dashed border-slate-200 pb-2 px-2">
-                  {performanceBars.map((bar, idx) => (
-                    <div key={idx} className="flex flex-col items-center gap-2">
-                      <div className="flex items-end gap-1 h-36">
-                        {/* Learning Bar */}
-                        <div
-                          className="w-2.5 bg-[#2563EB] rounded-t-md transition-all"
-                          style={{ height: `${bar.learning}%` }}
-                          title={`Learning: ${bar.learning}%`}
-                        />
-                        {/* Practice Bar */}
-                        <div
-                          className="w-2.5 bg-[#FF5A36] rounded-t-md transition-all"
-                          style={{ height: `${bar.practice}%` }}
-                          title={`Practice: ${bar.practice}%`}
-                        />
-                        {/* Assessment Bar */}
-                        <div
-                          className="w-2.5 bg-[#8B5CF6] rounded-t-md transition-all"
-                          style={{ height: `${bar.assessment}%` }}
-                          title={`Assessment: ${bar.assessment}%`}
-                        />
-                      </div>
-                      <span className="text-[10px] text-slate-400 font-semibold whitespace-nowrap">
-                        {bar.month}
-                      </span>
-                    </div>
-                  ))}
-                </div>
-
-                {/* Chart Legend */}
-                <div className="flex items-center justify-center gap-6 mt-4 text-xs font-semibold text-slate-600">
-                  <div className="flex items-center gap-2">
-                    <span className="h-2.5 w-2.5 rounded-full bg-[#2563EB]" />
-                    <span>Learning</span>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <span className="h-2.5 w-2.5 rounded-full bg-[#FF5A36]" />
-                    <span>Practice</span>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <span className="h-2.5 w-2.5 rounded-full bg-[#8B5CF6]" />
-                    <span>Assessment</span>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            {/* Skill Progress (4 columns) */}
-            <div className="col-span-4 rounded-3xl bg-white p-6 border border-slate-200/80 shadow-sm flex flex-col justify-between">
-              <h3 className="text-base font-bold text-slate-900">
-                Skill Progress
-              </h3>
-
-              {/* Donut graphic */}
-              <div className="relative flex items-center justify-center my-3">
-                <svg className="w-28 h-28 transform -rotate-90">
-                  <circle
-                    cx="56"
-                    cy="56"
-                    r="44"
-                    stroke="#F1F5F9"
-                    strokeWidth="9"
-                    fill="transparent"
-                  />
-                  <circle
-                    cx="56"
-                    cy="56"
-                    r="44"
-                    stroke="#FF5A36"
-                    strokeWidth="9"
-                    strokeDasharray={2 * Math.PI * 44}
-                    strokeDashoffset={2 * Math.PI * 44 * (1 - 0.6)}
-                    strokeLinecap="round"
-                    fill="transparent"
-                  />
-                  <circle
-                    cx="56"
-                    cy="56"
-                    r="44"
-                    stroke="#2563EB"
-                    strokeWidth="9"
-                    strokeDasharray={2 * Math.PI * 44}
-                    strokeDashoffset={2 * Math.PI * 44 * (1 - 0.35)}
-                    strokeLinecap="round"
-                    fill="transparent"
-                  />
-                </svg>
-                <div className="absolute flex flex-col items-center justify-center text-center">
-                  <span className="text-xl font-extrabold text-slate-900">60%</span>
-                  <span className="text-[9px] text-slate-400 font-semibold">Overall Progress</span>
-                </div>
-              </div>
-
-              {/* Skills legend list with % */}
-              <div className="space-y-2 text-xs">
-                {skillProgressData.map((item, idx) => (
-                  <div key={idx} className="flex items-center justify-between">
-                    <div className="flex items-center gap-2 text-slate-700 font-medium">
-                      <span
-                        className="h-2.5 w-2.5 rounded-full"
-                        style={{ backgroundColor: item.color }}
-                      />
-                      <span>{item.name}</span>
-                    </div>
-                    <span className="font-bold text-slate-800">{item.percent}%</span>
-                  </div>
-                ))}
               </div>
             </div>
           </div>

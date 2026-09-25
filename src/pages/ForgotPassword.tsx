@@ -1,42 +1,39 @@
-import React, { useState, useMemo } from "react";
+import React, { useState, useEffect, useRef, useMemo } from "react";
 import { AuthLayout } from "../components/auth/AuthLayout";
 import { AuthInput } from "../components/auth/AuthInput";
 import { PasswordInput } from "../components/auth/PasswordInput";
 import {
-  PasswordStrengthIndicator,
-  evaluatePassword,
-} from "../components/auth/PasswordStrengthIndicator";
-import {
-  identifyStudentAccount,
-  verifySecurityAnswers,
-  resetPasswordWithSecurity,
+  requestPasswordResetOtp,
+  verifyPasswordResetOtp,
+  resetPasswordWithOtp,
 } from "../services/auth";
 import {
   Loader2,
   CheckCircle2,
-  ShieldCheck,
-  KeyRound,
   ArrowLeft,
   AlertCircle,
-  HelpCircle,
+  Mail,
+  KeyRound,
+  ShieldCheck,
+  Check,
+  RotateCcw,
 } from "lucide-react";
 
 interface ForgotPasswordPageProps {
   onNavigateToLogin: () => void;
 }
 
-type ForgotStep = "identify" | "security_questions" | "new_password" | "success";
+type ForgotStep = "email" | "otp" | "new_password" | "success";
+
+const OTP_LENGTH = 6;
+const RESEND_COOLDOWN_SECONDS = 60;
 
 export const ForgotPasswordPage: React.FC<ForgotPasswordPageProps> = ({
   onNavigateToLogin,
 }) => {
-  const [step, setStep] = useState<ForgotStep>("identify");
-  const [identifier, setIdentifier] = useState("");
-  const [accountEmail, setAccountEmail] = useState("");
-  const [question1, setQuestion1] = useState("");
-  const [question2, setQuestion2] = useState("");
-  const [answer1, setAnswer1] = useState("");
-  const [answer2, setAnswer2] = useState("");
+  const [step, setStep] = useState<ForgotStep>("email");
+  const [email, setEmail] = useState("");
+  const [otpDigits, setOtpDigits] = useState<string[]>(Array(OTP_LENGTH).fill(""));
   const [resetToken, setResetToken] = useState("");
 
   const [newPassword, setNewPassword] = useState("");
@@ -44,52 +41,176 @@ export const ForgotPasswordPage: React.FC<ForgotPasswordPageProps> = ({
 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [infoMessage, setInfoMessage] = useState<string | null>(null);
 
-  // Live password validation
-  const passwordEvaluation = useMemo(
-    () => evaluatePassword(newPassword),
-    [newPassword]
-  );
-  const passwordsMatch =
-    confirmPassword.length === 0 || newPassword === confirmPassword;
+  // Resend cooldown timer in seconds
+  const [cooldown, setCooldown] = useState<number>(0);
 
-  // Step 1: Identify Account
-  const handleIdentify = async (e: React.FormEvent) => {
+  // Refs for 6-digit OTP input boxes
+  const otpRefs = useRef<(HTMLInputElement | null)[]>([]);
+
+  // Decrement countdown timer every second
+  useEffect(() => {
+    if (cooldown <= 0) return;
+    const interval = setInterval(() => {
+      setCooldown((prev) => (prev > 0 ? prev - 1 : 0));
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [cooldown]);
+
+  // Auto-focus first OTP input when entering OTP step
+  useEffect(() => {
+    if (step === "otp") {
+      const timer = setTimeout(() => {
+        otpRefs.current[0]?.focus();
+      }, 50);
+      return () => clearTimeout(timer);
+    }
+  }, [step]);
+
+  // Password validation policy checks
+  const passwordPolicy = useMemo(() => {
+    const hasMinLen = newPassword.length >= 8;
+    const hasUpper = /[A-Z]/.test(newPassword);
+    const hasNumber = /[0-9]/.test(newPassword);
+    const hasSpecial = /[!@#$%^&*()_+\-=[\]{};':"\\|,.<>/?]/.test(newPassword);
+    const isValid = hasMinLen && hasUpper && hasNumber && hasSpecial;
+    const matches = confirmPassword.length > 0 && newPassword === confirmPassword;
+
+    return {
+      hasMinLen,
+      hasUpper,
+      hasNumber,
+      hasSpecial,
+      isValid,
+      matches,
+    };
+  }, [newPassword, confirmPassword]);
+
+  // ----------------------------------------------------
+  // STEP 1: REQUEST OTP
+  // ----------------------------------------------------
+  const handleRequestOtp = async (e: React.FormEvent) => {
     e.preventDefault();
-    const cleanId = identifier.trim();
-    if (!cleanId) {
-      setError("Please enter your academic email or roll number.");
+    const cleanEmail = email.trim();
+
+    if (!cleanEmail) {
+      setError("Please enter your registered email address.");
       return;
     }
+
+    // Basic email format check
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleanEmail)) {
+      setError("Please enter a valid email address.");
+      return;
+    }
+
     setError(null);
     setLoading(true);
 
     try {
-      const res = await identifyStudentAccount(cleanId);
-      setAccountEmail(res.identifier);
-      setQuestion1(res.question1);
-      setQuestion2(res.question2);
-      setAnswer1("");
-      setAnswer2("");
-      setStep("security_questions");
+      const res = await requestPasswordResetOtp(cleanEmail);
+      // Generic message to prevent email enumeration
+      setInfoMessage(
+        res.message || "If an account exists with this email, an OTP has been sent."
+      );
+      setOtpDigits(Array(OTP_LENGTH).fill(""));
+      setCooldown(RESEND_COOLDOWN_SECONDS);
+      setStep("otp");
     } catch (err: any) {
+      // Even if network errors occur, show helpful guidance
       setError(
-        err.message ||
-          "Unable to find an account matching these details or security questions are not configured."
+        err.message || "Unable to send verification OTP. Please try again."
       );
     } finally {
       setLoading(false);
     }
   };
 
-  // Step 2: Verify Security Answers
-  const handleVerifyAnswers = async (e: React.FormEvent) => {
-    e.preventDefault();
-    const cleanAns1 = answer1.trim();
-    const cleanAns2 = answer2.trim();
+  // ----------------------------------------------------
+  // STEP 2: VERIFY OTP
+  // ----------------------------------------------------
+  const handleOtpDigitChange = (index: number, value: string) => {
+    if (error) setError(null);
 
-    if (!cleanAns1 || !cleanAns2) {
-      setError("Both security answers are required.");
+    // Keep only numeric characters
+    const numericChar = value.replace(/\D/g, "");
+
+    // If empty (e.g. cleared)
+    if (!numericChar) {
+      const updated = [...otpDigits];
+      updated[index] = "";
+      setOtpDigits(updated);
+      return;
+    }
+
+    // Single digit input
+    const char = numericChar.slice(-1);
+    const updated = [...otpDigits];
+    updated[index] = char;
+    setOtpDigits(updated);
+
+    // Advance focus to next input
+    if (index < OTP_LENGTH - 1) {
+      otpRefs.current[index + 1]?.focus();
+    }
+  };
+
+  const handleOtpKeyDown = (
+    index: number,
+    e: React.KeyboardEvent<HTMLInputElement>
+  ) => {
+    if (e.key === "Backspace") {
+      if (!otpDigits[index] && index > 0) {
+        // Move to previous box and clear it
+        otpRefs.current[index - 1]?.focus();
+        const updated = [...otpDigits];
+        updated[index - 1] = "";
+        setOtpDigits(updated);
+      } else {
+        const updated = [...otpDigits];
+        updated[index] = "";
+        setOtpDigits(updated);
+      }
+    } else if (e.key === "ArrowLeft" && index > 0) {
+      otpRefs.current[index - 1]?.focus();
+    } else if (e.key === "ArrowRight" && index < OTP_LENGTH - 1) {
+      otpRefs.current[index + 1]?.focus();
+    }
+  };
+
+  const handleOtpPaste = (e: React.ClipboardEvent<HTMLInputElement>) => {
+    e.preventDefault();
+    if (error) setError(null);
+
+    const pastedData = e.clipboardData.getData("text");
+    const digitsOnly = pastedData.replace(/\D/g, "").slice(0, OTP_LENGTH);
+
+    if (digitsOnly.length > 0) {
+      const updated = [...otpDigits];
+      for (let i = 0; i < OTP_LENGTH; i++) {
+        updated[i] = digitsOnly[i] || "";
+      }
+      setOtpDigits(updated);
+
+      // Focus the next empty box or the last box
+      const nextEmptyIndex = updated.findIndex((d) => !d);
+      if (nextEmptyIndex !== -1) {
+        otpRefs.current[nextEmptyIndex]?.focus();
+      } else {
+        otpRefs.current[OTP_LENGTH - 1]?.focus();
+      }
+    }
+  };
+
+  const fullOtpCode = otpDigits.join("");
+  const isOtpComplete = fullOtpCode.length === OTP_LENGTH;
+
+  const handleVerifyOtp = async (e: React.FormEvent) => {
+    e.preventDefault();
+
+    if (!isOtpComplete) {
+      setError("Please enter the complete 6-digit OTP.");
       return;
     }
 
@@ -97,27 +218,44 @@ export const ForgotPasswordPage: React.FC<ForgotPasswordPageProps> = ({
     setLoading(true);
 
     try {
-      const res = await verifySecurityAnswers({
-        identifier: accountEmail || identifier.trim(),
-        securityAnswer1: cleanAns1,
-        securityAnswer2: cleanAns2,
-      });
-
+      const res = await verifyPasswordResetOtp(email.trim(), fullOtpCode);
       setResetToken(res.resetToken);
       setNewPassword("");
       setConfirmPassword("");
       setStep("new_password");
     } catch (err: any) {
-      // Show generic error without exposing which answer was incorrect
       setError(
-        err.message || "The security answers are incorrect."
+        err.message || "Invalid or expired OTP. Please check and try again."
       );
     } finally {
       setLoading(false);
     }
   };
 
-  // Step 3: Reset Password
+  const handleResendOtp = async () => {
+    if (cooldown > 0 || loading) return;
+
+    setError(null);
+    setLoading(true);
+
+    try {
+      const res = await requestPasswordResetOtp(email.trim());
+      setInfoMessage(
+        res.message || "If an account exists with this email, an OTP has been sent."
+      );
+      setCooldown(RESEND_COOLDOWN_SECONDS);
+      setOtpDigits(Array(OTP_LENGTH).fill(""));
+      otpRefs.current[0]?.focus();
+    } catch (err: any) {
+      setError(err.message || "Failed to resend OTP. Please try again.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // ----------------------------------------------------
+  // STEP 3: RESET PASSWORD
+  // ----------------------------------------------------
   const handleResetPassword = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
@@ -127,9 +265,9 @@ export const ForgotPasswordPage: React.FC<ForgotPasswordPageProps> = ({
       return;
     }
 
-    if (!passwordEvaluation.isValid) {
+    if (!passwordPolicy.isValid) {
       setError(
-        "Password must contain at least 8 characters, uppercase, lowercase, a number, and a special character."
+        "Password must be at least 8 characters and include uppercase, lowercase, a number, and a special character."
       );
       return;
     }
@@ -142,11 +280,8 @@ export const ForgotPasswordPage: React.FC<ForgotPasswordPageProps> = ({
     setLoading(true);
 
     try {
-      await resetPasswordWithSecurity({
+      await resetPasswordWithOtp({
         resetToken,
-        identifier: accountEmail || identifier.trim(),
-        securityAnswer1: answer1.trim(),
-        securityAnswer2: answer2.trim(),
         newPassword,
         confirmPassword,
       });
@@ -159,22 +294,30 @@ export const ForgotPasswordPage: React.FC<ForgotPasswordPageProps> = ({
     }
   };
 
+  const formatCooldown = (seconds: number) => {
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    return `${String(mins).padStart(2, "0")}:${String(secs).padStart(2, "0")}`;
+  };
+
   return (
     <AuthLayout showHero={false}>
       <div className="w-full">
-        {/* STEP 1: IDENTIFY ACCOUNT */}
-        {step === "identify" && (
+        {/* ==================================================== */}
+        {/* STEP 1: ENTER REGISTERED EMAIL */}
+        {/* ==================================================== */}
+        {step === "email" && (
           <div>
             <div className="mb-6 sm:mb-8">
               <h2 className="text-[30px] sm:text-[34px] font-bold text-[#111315] tracking-tight leading-tight">
-                Forgot Password
+                Forgot Password?
               </h2>
               <p className="mt-2 text-[15px] text-[#737373] font-normal">
-                Enter your registered campus email or roll number to locate your student profile and recover your account.
+                Enter your registered email address.
               </p>
             </div>
 
-            <form onSubmit={handleIdentify} noValidate className="space-y-4">
+            <form onSubmit={handleRequestOtp} noValidate className="space-y-4">
               {error && (
                 <div
                   role="alert"
@@ -186,14 +329,15 @@ export const ForgotPasswordPage: React.FC<ForgotPasswordPageProps> = ({
               )}
 
               <AuthInput
-                id="input-forgot-identifier"
-                label="Email or Roll Number"
-                placeholder="Student Email or Roll / Reg. Number"
+                id="input-forgot-email"
+                label="Email Address"
+                placeholder="Email Address"
                 hideLabelVisually
-                type="text"
-                value={identifier}
+                type="email"
+                autoComplete="email"
+                value={email}
                 onChange={(e) => {
-                  setIdentifier(e.target.value);
+                  setEmail(e.target.value);
                   if (error) setError(null);
                 }}
                 disabled={loading}
@@ -202,18 +346,18 @@ export const ForgotPasswordPage: React.FC<ForgotPasswordPageProps> = ({
 
               <div className="pt-2">
                 <button
-                  id="btn-find-account"
+                  id="btn-send-otp"
                   type="submit"
-                  disabled={loading}
-                  className="w-full h-[54px] sm:h-[58px] flex items-center justify-center gap-2 rounded-[9px] bg-[#111315] text-white text-[15px] font-semibold tracking-wide hover:bg-[#202327] hover:-translate-y-[0.5px] active:scale-[0.99] transition-all duration-200 cursor-pointer disabled:opacity-60"
+                  disabled={loading || !email.trim()}
+                  className="w-full h-[52px] sm:h-[54px] flex items-center justify-center gap-2 rounded-[9px] bg-[#111315] text-white text-[15px] font-semibold tracking-wide hover:bg-[#202327] hover:-translate-y-[0.5px] active:scale-[0.99] transition-all duration-200 cursor-pointer disabled:opacity-60 disabled:pointer-events-none"
                 >
                   {loading ? (
                     <>
                       <Loader2 className="h-5 w-5 animate-spin text-white" />
-                      <span>Checking Student Records...</span>
+                      <span>Sending OTP...</span>
                     </>
                   ) : (
-                    <span>Continue to Security Verification</span>
+                    <span>Send OTP</span>
                   )}
                 </button>
               </div>
@@ -223,143 +367,161 @@ export const ForgotPasswordPage: React.FC<ForgotPasswordPageProps> = ({
                   id="btn-back-login"
                   type="button"
                   onClick={onNavigateToLogin}
+                  disabled={loading}
                   className="text-[14px] font-medium text-[#737373] hover:text-[#111315] transition-colors cursor-pointer inline-flex items-center gap-1.5"
                 >
                   <ArrowLeft className="h-4 w-4" />
-                  <span>Back to Sign In</span>
+                  <span>Back to Login</span>
                 </button>
               </div>
             </form>
           </div>
         )}
 
-        {/* STEP 2: VERIFY SECURITY QUESTIONS */}
-        {step === "security_questions" && (
+        {/* ==================================================== */}
+        {/* STEP 2: VERIFY 6-DIGIT OTP */}
+        {/* ==================================================== */}
+        {step === "otp" && (
           <div>
             <div className="mb-5 sm:mb-6">
-              <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-slate-100 border border-slate-200 text-xs font-semibold text-slate-700 mb-2">
+              <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-slate-100 border border-slate-200 text-xs font-semibold text-slate-700 mb-2.5">
                 <ShieldCheck className="h-3.5 w-3.5 text-indigo-600" />
-                <span>Account Recovery</span>
+                <span>Email Verification</span>
               </div>
               <h2 className="text-[28px] sm:text-[32px] font-bold text-[#111315] tracking-tight leading-tight">
-                Security Questions
+                Verify OTP
               </h2>
               <p className="mt-1.5 text-[14px] text-[#737373]">
-                Answer both recovery questions configured during registration to confirm your identity.
+                Enter the 6-digit OTP sent to your email.
               </p>
             </div>
 
-            <form onSubmit={handleVerifyAnswers} noValidate className="space-y-4">
-              {error && (
-                <div
-                  role="alert"
-                  className="rounded-[9px] bg-[#FFF5F3] border border-[#FF5A36]/30 px-4 py-3 text-sm font-medium text-[#D93815] flex items-center gap-2"
-                >
-                  <AlertCircle className="h-4 w-4 shrink-0" />
-                  <span>{error}</span>
-                </div>
-              )}
+            {/* Generic confirmation message that OTP was dispatched */}
+            {infoMessage && (
+              <div
+                role="status"
+                className="mb-4 rounded-[9px] bg-slate-50 border border-slate-200/90 px-3.5 py-2.5 text-xs sm:text-sm text-slate-700 flex items-start gap-2.5"
+              >
+                <Mail className="h-4 w-4 shrink-0 text-slate-500 mt-0.5" />
+                <span className="leading-snug">{infoMessage}</span>
+              </div>
+            )}
 
-              {/* Security Question 1 */}
-              <div className="rounded-[10px] bg-slate-50 border border-slate-200/90 p-4 space-y-2">
-                <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-slate-600">
-                  <HelpCircle className="h-4 w-4 text-indigo-600 shrink-0" />
-                  <span>Security Question 1</span>
-                </div>
-                <p className="text-[14px] font-semibold text-[#111315] leading-snug">
-                  {question1}
-                </p>
-                <div className="pt-1">
-                  <AuthInput
-                    id="input-security-answer-1"
-                    label="Answer 1"
-                    placeholder="Enter your answer"
-                    hideLabelVisually
-                    type="text"
-                    value={answer1}
-                    onChange={(e) => {
-                      setAnswer1(e.target.value);
-                      if (error) setError(null);
+            {/* Error Banner */}
+            {error && (
+              <div
+                role="alert"
+                className="mb-4 rounded-[9px] bg-[#FFF5F3] border border-[#FF5A36]/30 px-4 py-3 text-sm font-medium text-[#D93815] flex items-center gap-2"
+              >
+                <AlertCircle className="h-4 w-4 shrink-0" />
+                <span>{error}</span>
+              </div>
+            )}
+
+            <form onSubmit={handleVerifyOtp} noValidate className="space-y-5">
+              {/* 6 Segmented OTP Boxes */}
+              <div className="flex justify-between items-center gap-2 sm:gap-2.5 pt-1">
+                {otpDigits.map((digit, index) => (
+                  <input
+                    key={index}
+                    ref={(el) => {
+                      otpRefs.current[index] = el;
                     }}
+                    id={`otp-digit-${index}`}
+                    type="text"
+                    inputMode="numeric"
+                    pattern="[0-9]*"
+                    maxLength={1}
+                    value={digit}
+                    onChange={(e) => handleOtpDigitChange(index, e.target.value)}
+                    onKeyDown={(e) => handleOtpKeyDown(index, e)}
+                    onPaste={handleOtpPaste}
                     disabled={loading}
-                    autoFocus
+                    aria-label={`Digit ${index + 1} of 6`}
+                    className={`w-11 h-13 sm:w-13 sm:h-14 text-center font-bold text-xl sm:text-2xl rounded-[9px] border bg-white text-[#111315] transition-all duration-150 outline-none select-all ${
+                      digit
+                        ? "border-[#111315] bg-[#FAF8F5]"
+                        : "border-[#E5E3DE] hover:border-slate-400"
+                    } focus:border-[#111315] focus:ring-2 focus:ring-[#111315]/10`}
                   />
-                </div>
+                ))}
               </div>
 
-              {/* Security Question 2 */}
-              <div className="rounded-[10px] bg-slate-50 border border-slate-200/90 p-4 space-y-2">
-                <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-slate-600">
-                  <HelpCircle className="h-4 w-4 text-indigo-600 shrink-0" />
-                  <span>Security Question 2</span>
-                </div>
-                <p className="text-[14px] font-semibold text-[#111315] leading-snug">
-                  {question2}
-                </p>
-                <div className="pt-1">
-                  <AuthInput
-                    id="input-security-answer-2"
-                    label="Answer 2"
-                    placeholder="Enter your answer"
-                    hideLabelVisually
-                    type="text"
-                    value={answer2}
-                    onChange={(e) => {
-                      setAnswer2(e.target.value);
-                      if (error) setError(null);
-                    }}
-                    disabled={loading}
-                  />
-                </div>
-              </div>
-
-              <div className="pt-2 flex flex-col gap-2.5">
+              {/* Verify OTP Button */}
+              <div className="pt-2">
                 <button
-                  id="btn-verify-security-answers"
+                  id="btn-verify-otp"
                   type="submit"
-                  disabled={loading}
-                  className="w-full h-[54px] sm:h-[58px] flex items-center justify-center gap-2 rounded-[9px] bg-[#111315] text-white text-[15px] font-semibold tracking-wide hover:bg-[#202327] hover:-translate-y-[0.5px] active:scale-[0.99] transition-all duration-200 cursor-pointer disabled:opacity-60"
+                  disabled={loading || !isOtpComplete}
+                  className="w-full h-[52px] sm:h-[54px] flex items-center justify-center gap-2 rounded-[9px] bg-[#111315] text-white text-[15px] font-semibold tracking-wide hover:bg-[#202327] hover:-translate-y-[0.5px] active:scale-[0.99] transition-all duration-200 cursor-pointer disabled:opacity-60 disabled:pointer-events-none"
                 >
                   {loading ? (
                     <>
                       <Loader2 className="h-5 w-5 animate-spin text-white" />
-                      <span>Verifying Answers...</span>
+                      <span>Verifying OTP...</span>
                     </>
                   ) : (
-                    <span>Verify & Continue</span>
+                    <span>Verify OTP</span>
                   )}
                 </button>
+              </div>
+
+              {/* Resend Cooldown Counter & Controls */}
+              <div className="flex flex-col items-center gap-3 pt-1 text-center">
+                {cooldown > 0 ? (
+                  <p className="text-[13.5px] font-medium text-[#737373]">
+                    Resend OTP in{" "}
+                    <span className="font-semibold text-[#111315] tabular-nums">
+                      {formatCooldown(cooldown)}
+                    </span>
+                  </p>
+                ) : (
+                  <button
+                    id="btn-resend-otp"
+                    type="button"
+                    onClick={handleResendOtp}
+                    disabled={loading}
+                    className="inline-flex items-center gap-1.5 text-[14px] font-semibold text-[#111315] hover:text-indigo-600 transition-colors cursor-pointer"
+                  >
+                    <RotateCcw className="h-3.5 w-3.5" />
+                    <span>Resend OTP</span>
+                  </button>
+                )}
 
                 <button
+                  id="btn-change-email"
                   type="button"
                   onClick={() => {
                     setError(null);
-                    setStep("identify");
+                    setInfoMessage(null);
+                    setStep("email");
                   }}
                   disabled={loading}
-                  className="w-full py-2.5 text-[14px] font-medium text-[#737373] hover:text-[#111315] transition-colors cursor-pointer text-center inline-flex items-center justify-center gap-1.5"
+                  className="text-[13.5px] font-medium text-[#737373] hover:text-[#111315] transition-colors cursor-pointer inline-flex items-center gap-1"
                 >
-                  <ArrowLeft className="h-4 w-4" />
-                  <span>Change Identifier</span>
+                  <ArrowLeft className="h-3.5 w-3.5" />
+                  <span>Use a different email address</span>
                 </button>
               </div>
             </form>
           </div>
         )}
 
-        {/* STEP 3: SET NEW PASSWORD */}
+        {/* ==================================================== */}
+        {/* STEP 3: CREATE NEW PASSWORD */}
+        {/* ==================================================== */}
         {step === "new_password" && (
           <div>
             <div className="mb-5 sm:mb-6">
-              <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-emerald-50 border border-emerald-200 text-xs font-semibold text-emerald-800 mb-2">
+              <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-emerald-50 border border-emerald-200 text-xs font-semibold text-emerald-800 mb-2.5">
                 <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600" />
-                <span>Identity Verified</span>
+                <span>OTP Verified</span>
               </div>
               <h2 className="text-[28px] sm:text-[32px] font-bold text-[#111315] tracking-tight leading-tight">
                 Create New Password
               </h2>
               <p className="mt-1.5 text-[14px] text-[#737373]">
-                Enter a strong new password meeting campus security requirements.
+                Enter a new password meeting campus security requirements.
               </p>
             </div>
 
@@ -376,9 +538,9 @@ export const ForgotPasswordPage: React.FC<ForgotPasswordPageProps> = ({
 
               <div>
                 <PasswordInput
-                  id="input-reset-new-password"
+                  id="input-new-password"
                   label="New Password"
-                  placeholder="Create new password"
+                  placeholder="New Password"
                   value={newPassword}
                   onChange={(e) => {
                     setNewPassword(e.target.value);
@@ -387,38 +549,122 @@ export const ForgotPasswordPage: React.FC<ForgotPasswordPageProps> = ({
                   disabled={loading}
                   autoFocus
                 />
-                <PasswordStrengthIndicator password={newPassword} />
               </div>
 
               <div>
                 <PasswordInput
-                  id="input-reset-confirm-password"
-                  label="Confirm New Password"
-                  placeholder="Re-enter new password"
+                  id="input-confirm-password"
+                  label="Confirm Password"
+                  placeholder="Confirm Password"
                   value={confirmPassword}
                   onChange={(e) => {
                     setConfirmPassword(e.target.value);
                     if (error) setError(null);
                   }}
                   disabled={loading}
-                  error={!passwordsMatch ? "Passwords do not match." : undefined}
+                  error={
+                    confirmPassword && !passwordPolicy.matches
+                      ? "Passwords do not match."
+                      : undefined
+                  }
                 />
+              </div>
+
+              {/* Password Requirements Checklist */}
+              <div className="rounded-[9px] bg-slate-50 border border-slate-200/90 p-3.5 space-y-2">
+                <p className="text-xs font-bold uppercase tracking-wider text-slate-500 mb-1">
+                  Password Requirements
+                </p>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5 text-xs">
+                  <div
+                    className={`flex items-center gap-1.5 transition-colors ${
+                      passwordPolicy.hasMinLen
+                        ? "text-emerald-700 font-medium"
+                        : "text-slate-500"
+                    }`}
+                  >
+                    <Check
+                      className={`h-3.5 w-3.5 shrink-0 ${
+                        passwordPolicy.hasMinLen
+                          ? "text-emerald-600 stroke-[2.5]"
+                          : "text-slate-300"
+                      }`}
+                    />
+                    <span>At least 8 characters</span>
+                  </div>
+
+                  <div
+                    className={`flex items-center gap-1.5 transition-colors ${
+                      passwordPolicy.hasUpper
+                        ? "text-emerald-700 font-medium"
+                        : "text-slate-500"
+                    }`}
+                  >
+                    <Check
+                      className={`h-3.5 w-3.5 shrink-0 ${
+                        passwordPolicy.hasUpper
+                          ? "text-emerald-600 stroke-[2.5]"
+                          : "text-slate-300"
+                      }`}
+                    />
+                    <span>One uppercase letter</span>
+                  </div>
+
+                  <div
+                    className={`flex items-center gap-1.5 transition-colors ${
+                      passwordPolicy.hasNumber
+                        ? "text-emerald-700 font-medium"
+                        : "text-slate-500"
+                    }`}
+                  >
+                    <Check
+                      className={`h-3.5 w-3.5 shrink-0 ${
+                        passwordPolicy.hasNumber
+                          ? "text-emerald-600 stroke-[2.5]"
+                          : "text-slate-300"
+                      }`}
+                    />
+                    <span>One number</span>
+                  </div>
+
+                  <div
+                    className={`flex items-center gap-1.5 transition-colors ${
+                      passwordPolicy.hasSpecial
+                        ? "text-emerald-700 font-medium"
+                        : "text-slate-500"
+                    }`}
+                  >
+                    <Check
+                      className={`h-3.5 w-3.5 shrink-0 ${
+                        passwordPolicy.hasSpecial
+                          ? "text-emerald-600 stroke-[2.5]"
+                          : "text-slate-300"
+                      }`}
+                    />
+                    <span>One special character</span>
+                  </div>
+                </div>
               </div>
 
               <div className="pt-2">
                 <button
-                  id="btn-save-new-password"
+                  id="btn-reset-password"
                   type="submit"
-                  disabled={loading}
-                  className="w-full h-[54px] sm:h-[58px] flex items-center justify-center gap-2 rounded-[9px] bg-[#111315] text-white text-[15px] font-semibold tracking-wide hover:bg-[#202327] hover:-translate-y-[0.5px] active:scale-[0.99] transition-all duration-200 cursor-pointer disabled:opacity-60"
+                  disabled={
+                    loading ||
+                    !passwordPolicy.isValid ||
+                    !passwordPolicy.matches
+                  }
+                  className="w-full h-[52px] sm:h-[54px] flex items-center justify-center gap-2 rounded-[9px] bg-[#111315] text-white text-[15px] font-semibold tracking-wide hover:bg-[#202327] hover:-translate-y-[0.5px] active:scale-[0.99] transition-all duration-200 cursor-pointer disabled:opacity-60 disabled:pointer-events-none"
                 >
                   {loading ? (
                     <>
                       <Loader2 className="h-5 w-5 animate-spin text-white" />
-                      <span>Saving New Password...</span>
+                      <span>Resetting Password...</span>
                     </>
                   ) : (
-                    <span>Set New Password</span>
+                    <span>Reset Password</span>
                   )}
                 </button>
               </div>
@@ -431,14 +677,16 @@ export const ForgotPasswordPage: React.FC<ForgotPasswordPageProps> = ({
                   className="text-[14px] font-medium text-[#737373] hover:text-[#111315] transition-colors cursor-pointer inline-flex items-center gap-1.5"
                 >
                   <ArrowLeft className="h-4 w-4" />
-                  <span>Cancel and Return to Sign In</span>
+                  <span>Back to Login</span>
                 </button>
               </div>
             </form>
           </div>
         )}
 
-        {/* STEP 4: SUCCESS */}
+        {/* ==================================================== */}
+        {/* STEP 4: PASSWORD RESET SUCCESS */}
+        {/* ==================================================== */}
         {step === "success" && (
           <div className="rounded-[12px] bg-white border border-[#E5E3DE] p-6 sm:p-8 text-center space-y-5 shadow-xs">
             <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-emerald-50 text-emerald-600 border border-emerald-100">
@@ -449,16 +697,16 @@ export const ForgotPasswordPage: React.FC<ForgotPasswordPageProps> = ({
                 Password Reset Successful
               </h3>
               <p className="mt-2 text-sm text-[#737373] leading-relaxed max-w-sm mx-auto">
-                Your password has been updated securely. All previous active sessions have been signed out. You can now log in using your new password.
+                Your password has been updated securely. All previous active sessions have been terminated. You can now log in using your new credentials.
               </p>
             </div>
             <button
               id="btn-return-login-success"
               type="button"
               onClick={onNavigateToLogin}
-              className="w-full h-[52px] sm:h-[56px] rounded-[9px] bg-[#111315] text-white text-[15px] font-semibold hover:bg-[#202327] transition-all cursor-pointer shadow-xs"
+              className="w-full h-[52px] sm:h-[54px] rounded-[9px] bg-[#111315] text-white text-[15px] font-semibold hover:bg-[#202327] transition-all cursor-pointer shadow-xs"
             >
-              Sign In to Placement OS
+              Return to Login
             </button>
           </div>
         )}

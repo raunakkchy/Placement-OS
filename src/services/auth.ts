@@ -116,6 +116,22 @@ export async function loginStudent(credentials: {
   return data;
 }
 
+export async function sendRegistrationOtp(params: {
+  email: string;
+  fullName: string;
+  rollNumber?: string;
+}): Promise<{ success: boolean; message: string }> {
+  const res = await fetch("/api/auth/send-registration-otp", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(params),
+  });
+
+  return parseApiResponse(res, "Failed to send registration verification OTP.");
+}
+
 export async function registerStudent(
   userData: Record<string, any>
 ): Promise<AuthResponse> {
@@ -325,6 +341,61 @@ export async function deleteStudentResume(): Promise<{
   });
 
   const data = await parseApiResponse(res, "Failed to remove resume.");
+  return data;
+}
+
+// ----------------------------------------------------
+// FORGOT PASSWORD WITH EMAIL OTP VERIFICATION
+// ----------------------------------------------------
+
+export async function requestPasswordResetOtp(
+  email: string
+): Promise<{ message: string }> {
+  const cleanEmail = email.trim();
+  const res = await fetch("/api/auth/forgot-password", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    credentials: "include",
+    body: JSON.stringify({ email: cleanEmail }),
+  });
+
+  const data = await parseApiResponse(
+    res,
+    "Unable to process password reset request. Please try again."
+  );
+  return data;
+}
+
+export async function verifyPasswordResetOtp(
+  email: string,
+  otp: string
+): Promise<{ success: boolean; resetToken: string; message: string }> {
+  const cleanEmail = email.trim();
+  const cleanOtp = otp.trim();
+  const res = await fetch("/api/auth/verify-reset-otp", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    credentials: "include",
+    body: JSON.stringify({ email: cleanEmail, otp: cleanOtp }),
+  });
+
+  const data = await parseApiResponse(res, "Invalid or expired OTP. Please try again.");
+  return data;
+}
+
+export async function resetPasswordWithOtp(payload: {
+  resetToken: string;
+  newPassword: string;
+  confirmPassword?: string;
+}): Promise<{ success: boolean; message: string }> {
+  const res = await fetch("/api/auth/reset-password", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    credentials: "include",
+    body: JSON.stringify(payload),
+  });
+
+  const data = await parseApiResponse(res, "Failed to reset password. Please try again.");
   return data;
 }
 
