@@ -21,6 +21,8 @@ import {
   adaptRoadmapFromInterview,
   generateStudentAiProfileAnalysis,
   generateJobRoleRecommendations,
+  generateMcqQuestionsForStudent,
+  evaluateMcqTestSubmission,
 } from "./server/placementAi.js";
 import { parseResumeDocument } from "./server/resumeParser.js";
 import { getCareerRecommendations } from "./src/data/careerRecommendationEngine.js";
@@ -2607,7 +2609,7 @@ app.get("/api/dashboard", requireAuth, async (req: Request, res: Response) => {
     // 10. Real Recent Activities from MongoDB event timestamps
     const recentActivities: Array<{
       id: string;
-      type: "profile" | "role" | "skill_gap" | "roadmap" | "interview" | "resume";
+      type: "profile" | "role" | "skill_gap" | "roadmap" | "interview" | "resume" | "mcq";
       title: string;
       timestamp: string | null;
     }> = [];
@@ -2666,6 +2668,56 @@ app.get("/api/dashboard", requireAuth, async (req: Request, res: Response) => {
       });
     }
 
+    // 10. MCQ Test Stats
+    const completedMcqTests = await db.mcqTests.findCompletedByUserId(user.id);
+    let mcqStats = {
+      testsCompleted: completedMcqTests.length,
+      averageScorePercent: 0,
+      strongestSkill: null as string | null,
+      needsImprovementSkill: null as string | null,
+      latestTestAt: null as string | null,
+    };
+
+    if (completedMcqTests.length > 0) {
+      const totalPct = completedMcqTests.reduce((acc, t) => acc + (t.percentage || 0), 0);
+      mcqStats.averageScorePercent = Math.round(totalPct / completedMcqTests.length);
+      mcqStats.latestTestAt = completedMcqTests[0].submittedAt || completedMcqTests[0].startedAt || null;
+
+      // Calculate skill breakdown across tests
+      const skillAccMap: Record<string, { total: number; correct: number }> = {};
+      completedMcqTests.forEach((t) => {
+        (t.skillAnalysis || []).forEach((sa: any) => {
+          if (sa.name) {
+            if (!skillAccMap[sa.name]) skillAccMap[sa.name] = { total: 0, correct: 0 };
+            skillAccMap[sa.name].total += sa.total || 0;
+            skillAccMap[sa.name].correct += sa.correct || 0;
+          }
+        });
+      });
+
+      const skillList = Object.keys(skillAccMap).map((k) => ({
+        name: k,
+        pct: skillAccMap[k].total > 0 ? Math.round((skillAccMap[k].correct / skillAccMap[k].total) * 100) : 0,
+      }));
+
+      if (skillList.length > 0) {
+        skillList.sort((a, b) => b.pct - a.pct);
+        mcqStats.strongestSkill = skillList[0].name;
+        mcqStats.needsImprovementSkill = skillList[skillList.length - 1].pct < 70 ? skillList[skillList.length - 1].name : null;
+      }
+
+      for (const t of completedMcqTests.slice(0, 3)) {
+        if (t.submittedAt || t.startedAt) {
+          recentActivities.push({
+            id: `mcq-${t.id}`,
+            type: "mcq",
+            title: `Completed MCQ Assessment: ${t.targetSubject || t.role} (${t.percentage}%)`,
+            timestamp: t.submittedAt || t.startedAt,
+          });
+        }
+      }
+    }
+
     // Profile updated/created
     if (user.updatedAt || user.createdAt) {
       recentActivities.push({
@@ -2708,6 +2760,7 @@ app.get("/api/dashboard", requireAuth, async (req: Request, res: Response) => {
       academic,
       resume,
       nextAction,
+      mcqStats,
       recentActivities,
     });
   } catch (err: any) {
@@ -2906,6 +2959,194 @@ app.get("/api/interviews/:id", requireAuth, async (req: Request, res: Response) 
   } catch (err: any) {
     console.error("Interview detail error:", err);
     res.status(500).json({ error: "Failed to fetch interview detail: " + err.message });
+  }
+});
+
+// ----------------------------------------------------
+// AI MCQ ASSESSMENT API ENDPOINTS
+// ----------------------------------------------------
+
+// 1. Generate new MCQ assessment test
+app.post("/api/mcq/generate", requireAuth, async (req: Request, res: Response) => {
+  try {
+    const user = (req as any).user as UserDocument;
+    const { count = 10, difficulty = "Adaptive", testType = "role", targetSubject } = req.body;
+
+    const numQuestions = Math.min(50, Math.max(5, Number(count) || 10));
+    const diff = ["Easy", "Medium", "Hard", "Adaptive"].includes(difficulty) ? difficulty : "Adaptive";
+    const type = ["role", "skill", "skill_gap", "roadmap"].includes(testType) ? testType : "role";
+
+    const questions = await generateMcqQuestionsForStudent(user, {
+      count: numQuestions,
+      difficulty: diff,
+      testType: type,
+      targetSubject,
+    });
+
+    const testId = `mcq-${crypto.randomBytes(8).toString("hex")}`;
+    const selectedRole = user.selectedRole || user.targetRoles?.[0] || "Frontend Developer";
+    const timeLimit = numQuestions; // 1 minute per question
+
+    let testTypeLabel = "Role-Based Assessment";
+    if (type === "skill") testTypeLabel = `Skill Assessment (${targetSubject || "Selected Skill"})`;
+    else if (type === "skill_gap") testTypeLabel = "Skill Gap Diagnostic Assessment";
+    else if (type === "roadmap") testTypeLabel = "Roadmap Topic Assessment";
+
+    const createdTest = await db.mcqTests.create({
+      id: testId,
+      userId: user.id,
+      role: selectedRole,
+      testType: type,
+      testTypeLabel,
+      targetSubject: targetSubject || selectedRole,
+      difficulty: diff,
+      totalQuestions: questions.length,
+      timeLimitMinutes: timeLimit,
+      questions,
+      userAnswers: {},
+      markedForReview: [],
+      score: 0,
+      percentage: 0,
+      accuracy: 0,
+      correctCount: 0,
+      incorrectCount: 0,
+      unansweredCount: 0,
+      timeTakenSeconds: 0,
+      status: "in_progress",
+      startedAt: new Date().toISOString(),
+    });
+
+    // SECURITY: Exclude correctAnswer and explanation before sending test to client!
+    const sanitizedQuestions = createdTest.questions.map((q) => ({
+      id: q.id,
+      question: q.question,
+      options: q.options,
+      topic: q.topic,
+      skill: q.skill,
+      difficulty: q.difficulty,
+    }));
+
+    res.json({
+      test: {
+        id: createdTest.id,
+        userId: createdTest.userId,
+        role: createdTest.role,
+        testType: createdTest.testType,
+        testTypeLabel: createdTest.testTypeLabel,
+        targetSubject: createdTest.targetSubject,
+        difficulty: createdTest.difficulty,
+        totalQuestions: createdTest.totalQuestions,
+        timeLimitMinutes: createdTest.timeLimitMinutes,
+        questions: sanitizedQuestions,
+        status: createdTest.status,
+        startedAt: createdTest.startedAt,
+      },
+    });
+  } catch (err: any) {
+    console.error("MCQ generation error:", err);
+    res.status(500).json({ error: "We couldn't generate this assessment right now. Please try again." });
+  }
+});
+
+// 2. Fetch completed test history
+app.get("/api/mcq/tests", requireAuth, async (req: Request, res: Response) => {
+  try {
+    const user = (req as any).user as UserDocument;
+    const completedTests = await db.mcqTests.findCompletedByUserId(user.id);
+    res.json({ tests: completedTests });
+  } catch (err: any) {
+    console.error("MCQ history fetch error:", err);
+    res.status(500).json({ error: "Failed to fetch assessment history." });
+  }
+});
+
+// 3. Fetch specific test details
+app.get("/api/mcq/tests/:id", requireAuth, async (req: Request, res: Response) => {
+  try {
+    const user = (req as any).user as UserDocument;
+    const { id } = req.params;
+
+    const test = await db.mcqTests.findById(id);
+    if (!test || test.userId !== user.id) {
+      res.status(404).json({ error: "Assessment test not found." });
+      return;
+    }
+
+    if (test.status === "completed") {
+      res.json({ test });
+    } else {
+      // Hide correct answers and explanations for in-progress tests
+      const sanitizedQuestions = (test.questions || []).map((q) => ({
+        id: q.id,
+        question: q.question,
+        options: q.options,
+        topic: q.topic,
+        skill: q.skill,
+        difficulty: q.difficulty,
+      }));
+
+      res.json({
+        test: {
+          ...test,
+          questions: sanitizedQuestions,
+        },
+      });
+    }
+  } catch (err: any) {
+    console.error("MCQ test detail fetch error:", err);
+    res.status(500).json({ error: "Failed to fetch assessment test details." });
+  }
+});
+
+// 4. Submit MCQ test answers
+app.post("/api/mcq/tests/:id/submit", requireAuth, async (req: Request, res: Response) => {
+  try {
+    const user = (req as any).user as UserDocument;
+    const { id } = req.params;
+    const { userAnswers = {}, markedForReview = [], timeTakenSeconds = 0 } = req.body;
+
+    const test = await db.mcqTests.findById(id);
+    if (!test || test.userId !== user.id) {
+      res.status(404).json({ error: "Assessment test not found." });
+      return;
+    }
+
+    if (test.status === "completed") {
+      // Prevent duplicate submission, return existing completed result
+      res.json({ result: test });
+      return;
+    }
+
+    const evaluation = await evaluateMcqTestSubmission(
+      test,
+      userAnswers,
+      user,
+      timeTakenSeconds
+    );
+
+    const updatedTest = await db.mcqTests.update(id, {
+      userAnswers,
+      markedForReview,
+      timeTakenSeconds,
+      score: evaluation.score,
+      percentage: evaluation.percentage,
+      accuracy: evaluation.accuracy,
+      correctCount: evaluation.correctCount,
+      incorrectCount: evaluation.incorrectCount,
+      unansweredCount: evaluation.unansweredCount,
+      skillAnalysis: evaluation.skillAnalysis,
+      topicAnalysis: evaluation.topicAnalysis,
+      aiAnalysis: evaluation.aiAnalysis,
+      detectedSkillGaps: evaluation.detectedSkillGaps,
+      updatedRoadmapTopics: evaluation.updatedRoadmapTopics,
+      status: "completed",
+      submittedAt: new Date().toISOString(),
+    });
+
+    res.json({ result: updatedTest });
+  } catch (err: any) {
+    console.error("MCQ test submission error:", err);
+    res.status(500).json({ error: "Failed to evaluate assessment submission: " + err.message });
   }
 });
 

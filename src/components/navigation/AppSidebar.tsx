@@ -5,6 +5,7 @@ import {
   Briefcase,
   Compass,
   Video,
+  FileQuestion,
   User as UserIcon,
   ChevronRight,
   LogOut,
@@ -13,8 +14,8 @@ import {
 interface AppSidebarProps {
   user: User | null;
   readinessScore: ReadinessScore | null;
-  activeTab: "score" | "jobs" | "roadmap" | "interview";
-  setActiveTab: (tab: "score" | "jobs" | "roadmap" | "interview") => void;
+  activeTab: "score" | "jobs" | "roadmap" | "interview" | "mcq";
+  setActiveTab: (tab: "score" | "jobs" | "roadmap" | "interview" | "mcq") => void;
   onOpenProfile: () => void;
   onLogout: () => void;
   onCloseMobileDrawer?: () => void;
@@ -29,7 +30,7 @@ export const AppSidebar: React.FC<AppSidebarProps> = ({
   onLogout,
   onCloseMobileDrawer,
 }) => {
-  const handleNavClick = (tab: "score" | "jobs" | "roadmap" | "interview") => {
+  const handleNavClick = (tab: "score" | "jobs" | "roadmap" | "interview" | "mcq") => {
     setActiveTab(tab);
     if (onCloseMobileDrawer) onCloseMobileDrawer();
   };
@@ -54,6 +55,11 @@ export const AppSidebar: React.FC<AppSidebarProps> = ({
       id: "roadmap" as const,
       label: "Roadmap",
       icon: Compass,
+    },
+    {
+      id: "mcq" as const,
+      label: "MCQ Test",
+      icon: FileQuestion,
     },
     {
       id: "interview" as const,

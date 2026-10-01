@@ -11,6 +11,7 @@ import {
   Map,
   BookOpen,
   FileText,
+  FileQuestion,
   RefreshCw,
   Sparkles,
   ChevronRight,
@@ -28,7 +29,7 @@ interface ScoreDashboardProps {
   user: User;
   score?: ReadinessScore | null;
   onRecalculate?: () => void;
-  onNavigateTab: (tab: "score" | "jobs" | "roadmap" | "interview") => void;
+  onNavigateTab: (tab: "score" | "jobs" | "roadmap" | "interview" | "mcq") => void;
   onOpenProfile: () => void;
   isRecalculating?: boolean;
   dashboardData?: DashboardData | null;
@@ -921,6 +922,85 @@ export const ScoreDashboard: React.FC<ScoreDashboardProps> = ({
                 </svg>
               </div>
             </div>
+          </div>
+
+          {/* MCQ Assessment Performance Card */}
+          <div className="rounded-3xl bg-white p-6 border border-slate-200/80 shadow-sm space-y-4">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2 text-slate-900 font-bold text-base">
+                <FileQuestion className="h-5 w-5 text-[#2F54EB]" />
+                <span>AI MCQ Assessment Performance</span>
+              </div>
+              <button
+                onClick={() => onNavigateTab("mcq")}
+                className="text-xs font-bold text-[#2F54EB] hover:underline flex items-center gap-1 cursor-pointer"
+              >
+                <span>Assessment Hub</span>
+                <ArrowRight className="h-3.5 w-3.5" />
+              </button>
+            </div>
+
+            {data?.mcqStats && data.mcqStats.testsCompleted > 0 ? (
+              <div className="space-y-4">
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                  <div className="p-3.5 rounded-2xl bg-slate-50 border border-slate-100 text-center">
+                    <div className="text-xl font-black text-slate-900">{data.mcqStats.testsCompleted}</div>
+                    <div className="text-[10px] uppercase font-bold text-slate-400 mt-0.5">Tests Completed</div>
+                  </div>
+
+                  <div className="p-3.5 rounded-2xl bg-slate-50 border border-slate-100 text-center">
+                    <div className="text-xl font-black text-emerald-600">{data.mcqStats.averageScorePercent}%</div>
+                    <div className="text-[10px] uppercase font-bold text-slate-400 mt-0.5">Average Score</div>
+                  </div>
+
+                  <div className="p-3.5 rounded-2xl bg-slate-50 border border-slate-100 text-center">
+                    <div className="text-xs font-extrabold text-slate-900 truncate">
+                      {data.mcqStats.strongestSkill || "General Tech"}
+                    </div>
+                    <div className="text-[10px] uppercase font-bold text-emerald-600 mt-0.5">Strongest Skill</div>
+                  </div>
+
+                  <div className="p-3.5 rounded-2xl bg-slate-50 border border-slate-100 text-center">
+                    <div className="text-xs font-extrabold text-slate-900 truncate">
+                      {data.mcqStats.needsImprovementSkill || "None"}
+                    </div>
+                    <div className="text-[10px] uppercase font-bold text-rose-500 mt-0.5">Needs Practice</div>
+                  </div>
+                </div>
+
+                <div className="flex items-center justify-between text-xs pt-1">
+                  <span className="text-slate-500 font-medium">
+                    Target Role: <strong className="text-slate-800">{selectedRoleName}</strong>
+                  </span>
+                  <button
+                    onClick={() => onNavigateTab("mcq")}
+                    className="text-xs font-bold text-[#FF5A36] hover:underline flex items-center gap-1 cursor-pointer"
+                  >
+                    <span>Take Another Assessment</span>
+                    <ArrowRight className="h-3.5 w-3.5" />
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <div className="p-5 rounded-2xl bg-slate-50/80 border border-slate-200/80 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+                <div className="space-y-1">
+                  <div className="text-xs font-extrabold text-slate-900">
+                    No MCQ Assessments Completed Yet
+                  </div>
+                  <p className="text-xs font-medium text-slate-500 leading-relaxed max-w-lg">
+                    Test your knowledge with adaptive AI questions. Test scores directly detect skill gaps and update your learning roadmap.
+                  </p>
+                </div>
+
+                <button
+                  onClick={() => onNavigateTab("mcq")}
+                  className="px-5 py-2.5 rounded-2xl bg-[#2F54EB] hover:bg-[#2040c5] text-white text-xs font-bold transition-all shadow-2xs shrink-0 flex items-center gap-1.5 cursor-pointer"
+                >
+                  <Sparkles className="h-3.5 w-3.5" />
+                  <span>Start Assessment</span>
+                </button>
+              </div>
+            )}
           </div>
         </div>
 

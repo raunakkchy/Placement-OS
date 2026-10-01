@@ -12,6 +12,10 @@ import {
   StudentAiRecommendations,
   SkillGapAnalysis,
   PrioritySkillItem,
+  MCQQuestionItem,
+  MCQTestDocument,
+  db,
+  RoadmapModel,
 } from "./db.js";
 import {
   getCareerRecommendations,
@@ -2888,4 +2892,603 @@ ${verifiedEngine.recommendedRoles.slice(0, 5).map(r => `  * ${r.role} (${r.quali
     ],
   };
 }
+
+// ----------------------------------------------------
+// AI MCQ QUESTION GENERATOR & EVALUATION ENGINE
+// ----------------------------------------------------
+
+export async function generateMcqQuestionsForStudent(
+  user: UserDocument,
+  params: {
+    count: number; // 10, 20, 30, 50
+    difficulty: "Easy" | "Medium" | "Hard" | "Adaptive";
+    testType: "role" | "skill" | "skill_gap" | "roadmap";
+    targetSubject?: string;
+  }
+): Promise<MCQQuestionItem[]> {
+  const count = Math.min(50, Math.max(5, params.count || 10));
+  const selectedRole = user.selectedRole || user.targetRoles?.[0] || "Frontend Developer";
+  const course = user.course || "B.Tech";
+  const branch = user.branch || "Computer Science";
+  const skills = (user.skills || []).slice(0, 10).join(", ") || "JavaScript, HTML, CSS, React";
+  const subject = params.targetSubject || selectedRole;
+
+  const prompt = `
+Generate exactly ${count} high-quality, technically accurate, non-ambiguous multiple-choice assessment questions for a college student in ${course} (${branch}) targeting the role "${selectedRole}".
+
+Test Configuration:
+- Test Type: ${params.testType} (${subject})
+- Difficulty Level: ${params.difficulty}
+- Subject/Focus Area: ${subject}
+- Student Declared Skills: ${skills}
+
+Requirements:
+1. Each question must have EXACTLY 4 distinct option strings. No duplicate options.
+2. The "correctAnswer" MUST match one of the 4 options verbatim.
+3. Provide a clear, educational "explanation" for why the correct answer is right.
+4. Set "topic" (e.g. "JavaScript Scope", "React Hooks", "CSS Flexbox"), "skill" (e.g. "JavaScript", "CSS"), and "difficulty" ("Easy", "Medium", "Hard").
+5. Questions must be relevant to entry-level college campus placement recruitment for ${selectedRole}.
+
+Return JSON array of objects with keys:
+"question" (string), "options" (array of 4 strings), "correctAnswer" (string), "explanation" (string), "topic" (string), "skill" (string), "difficulty" ("Easy" | "Medium" | "Hard").
+`.trim();
+
+  try {
+    if (hasValidGeminiKey()) {
+      const aiResponse = await generateGeminiJson<any[]>(prompt, {
+        systemInstruction: "You are an expert technical interviewer and computer science placement assessor creating rigorous, clear, fair MCQ questions for college students.",
+      });
+
+      if (Array.isArray(aiResponse) && aiResponse.length >= Math.min(5, count / 2)) {
+        const validated: MCQQuestionItem[] = [];
+        aiResponse.forEach((q, idx) => {
+          if (
+            q &&
+            typeof q.question === "string" &&
+            q.question.trim().length > 5 &&
+            Array.isArray(q.options) &&
+            q.options.length === 4
+          ) {
+            const cleanOptions = q.options.map((o: any) => String(o || "").trim());
+            // Ensure no duplicate options
+            const uniqueOptions = Array.from(new Set(cleanOptions));
+            if (uniqueOptions.length === 4) {
+              let correct = String(q.correctAnswer || "").trim();
+              if (!cleanOptions.includes(correct)) {
+                correct = cleanOptions[0]; // fallback if mismatched
+              }
+
+              validated.push({
+                id: `q-${Date.now()}-${idx + 1}-${Math.random().toString(36).substring(2, 6)}`,
+                question: q.question.trim(),
+                options: cleanOptions,
+                correctAnswer: correct,
+                explanation: String(q.explanation || "Correct option selected based on technical domain principles.").trim(),
+                topic: String(q.topic || subject).trim(),
+                skill: String(q.skill || subject).trim(),
+                difficulty: q.difficulty === "Easy" || q.difficulty === "Hard" ? q.difficulty : "Medium",
+              });
+            }
+          }
+        });
+
+        if (validated.length >= Math.min(5, Math.floor(count * 0.6))) {
+          // If we got enough validated AI questions, fill any remaining shortfall with fallback items
+          if (validated.length < count) {
+            const extraFallback = getDomainFallbackQuestions(subject, count - validated.length, user);
+            validated.push(...extraFallback);
+          }
+          return validated.slice(0, count);
+        }
+      }
+    }
+  } catch (err) {
+    console.warn("Gemini MCQ generation encountered error, utilizing verified domain fallback question engine:", err);
+  }
+
+  // Domain Fallback Question Bank if AI is unavailable or fails
+  return getDomainFallbackQuestions(subject, count, user);
+}
+
+// Extensive verified fallback question bank by domain/subject
+function getDomainFallbackQuestions(subject: string, count: number, user: UserDocument): MCQQuestionItem[] {
+  const lowerSub = (subject || "").toLowerCase();
+  const role = user.selectedRole || "Software Developer";
+
+  const bank: MCQQuestionItem[] = [];
+
+  // 1. JavaScript & Frontend
+  if (lowerSub.includes("front") || lowerSub.includes("javascript") || lowerSub.includes("react") || lowerSub.includes("web") || lowerSub.includes("html") || lowerSub.includes("css")) {
+    bank.push(
+      {
+        id: `fb-js-1`,
+        question: "Which keyword is used to declare a block-scoped variable in modern JavaScript (ES6+)?",
+        options: ["var", "let", "define", "dim"],
+        correctAnswer: "let",
+        explanation: "The 'let' keyword declares a block-scoped local variable, optionally initializing it to a value.",
+        topic: "JavaScript Variable Declaration",
+        skill: "JavaScript",
+        difficulty: "Easy",
+      },
+      {
+        id: `fb-js-2`,
+        question: "What is the primary purpose of the React 'useEffect' hook?",
+        options: ["To manage state", "To perform side effects in functional components", "To create context", "To speed up rendering"],
+        correctAnswer: "To perform side effects in functional components",
+        explanation: "useEffect lets functional components perform side effects like data fetching, subscriptions, or DOM manipulation.",
+        topic: "React Hooks",
+        skill: "React",
+        difficulty: "Medium",
+      },
+      {
+        id: `fb-js-3`,
+        question: "In CSS Flexbox, which property aligns items along the cross axis?",
+        options: ["justify-content", "align-items", "flex-direction", "align-content"],
+        correctAnswer: "align-items",
+        explanation: "align-items sets the align-self value on all direct children as a group along the cross axis.",
+        topic: "CSS Flexbox",
+        skill: "CSS",
+        difficulty: "Easy",
+      },
+      {
+        id: `fb-js-4`,
+        question: "What does the Event Loop in JavaScript do?",
+        options: [
+          "Executes synchronous code simultaneously with multi-threading",
+          "Monitors the Call Stack and Task Queue, pushing callbacks to stack when empty",
+          "Compiles JavaScript code directly to binary machine code",
+          "Manages memory allocation and garbage collection"
+        ],
+        correctAnswer: "Monitors the Call Stack and Task Queue, pushing callbacks to stack when empty",
+        explanation: "The Event Loop continuously checks if the call stack is empty; if so, it dequeues the first task from the task queue and pushes it onto the call stack.",
+        topic: "Event Loop & Asynchronous JS",
+        skill: "JavaScript",
+        difficulty: "Hard",
+      },
+      {
+        id: `fb-js-5`,
+        question: "Which HTML5 semantic element is most appropriate for containing site navigation links?",
+        options: ["<section>", "<nav>", "<article>", "<aside>"],
+        correctAnswer: "<nav>",
+        explanation: "<nav> is intended for major navigation blocks on a page.",
+        topic: "HTML5 Semantic Elements",
+        skill: "HTML",
+        difficulty: "Easy",
+      },
+      {
+        id: `fb-js-6`,
+        question: "What is the return type of typeof NaN in JavaScript?",
+        options: ["'number'", "'nan'", "'undefined'", "'object'"],
+        correctAnswer: "'number'",
+        explanation: "In JavaScript, NaN (Not-a-Number) is technically a numeric data type value representing an unrepresentable value.",
+        topic: "JavaScript Data Types",
+        skill: "JavaScript",
+        difficulty: "Medium",
+      },
+      {
+        id: `fb-js-7`,
+        question: "In React, why should 'keys' be passed to items when rendering lists?",
+        options: [
+          "To style list items with CSS selectors",
+          "To help React identify which items have changed, been added, or been removed",
+          "To enable automatic caching of API calls",
+          "To force components to re-render on every state change"
+        ],
+        correctAnswer: "To help React identify which items have changed, been added, or been removed",
+        explanation: "Keys give elements a stable identity so React can reconcile DOM nodes efficiently during updates.",
+        topic: "React Rendering & Lists",
+        skill: "React",
+        difficulty: "Medium",
+      },
+      {
+        id: `fb-js-8`,
+        question: "Which HTTP method is idempotent and used to update an entire existing resource?",
+        options: ["POST", "PUT", "PATCH", "DELETE"],
+        correctAnswer: "PUT",
+        explanation: "PUT is idempotent and replaces the target resource entirely with the request payload.",
+        topic: "REST API & Web Fundamentals",
+        skill: "Web Fundamentals",
+        difficulty: "Medium",
+      }
+    );
+  }
+
+  // 2. Python & Data & SQL
+  if (lowerSub.includes("python") || lowerSub.includes("data") || lowerSub.includes("sql") || lowerSub.includes("analytic")) {
+    bank.push(
+      {
+        id: `fb-py-1`,
+        question: "Which SQL clause is used to filter records grouped by the GROUP BY clause?",
+        options: ["WHERE", "HAVING", "FILTER", "LIMIT"],
+        correctAnswer: "HAVING",
+        explanation: "The HAVING clause was added to SQL because the WHERE keyword cannot be used with aggregate functions.",
+        topic: "SQL Aggregations",
+        skill: "SQL",
+        difficulty: "Medium",
+      },
+      {
+        id: `fb-py-2`,
+        question: "In Python, which built-in data structure is mutable and ordered?",
+        options: ["Tuple", "List", "Set", "Frozenset"],
+        correctAnswer: "List",
+        explanation: "Lists in Python are ordered collections of items that can be modified (mutable).",
+        topic: "Python Data Structures",
+        skill: "Python",
+        difficulty: "Easy",
+      },
+      {
+        id: `fb-py-3`,
+        question: "What is the key difference between INNER JOIN and LEFT JOIN in SQL?",
+        options: [
+          "INNER JOIN returns matching rows; LEFT JOIN returns all rows from left table plus matching right table rows",
+          "LEFT JOIN is faster than INNER JOIN",
+          "INNER JOIN handles NULL values automatically while LEFT JOIN throws an error",
+          "They are identical aliases in SQL standards"
+        ],
+        correctAnswer: "INNER JOIN returns matching rows; LEFT JOIN returns all rows from left table plus matching right table rows",
+        explanation: "LEFT JOIN preserves all rows from the left table even if there is no match in the right table.",
+        topic: "SQL Joins",
+        skill: "SQL",
+        difficulty: "Medium",
+      },
+      {
+        id: `fb-py-4`,
+        question: "In Pandas, which method is used to remove missing or NaN values from a DataFrame?",
+        options: ["df.dropna()", "df.fillna()", "df.isna()", "df.clean()"],
+        correctAnswer: "df.dropna()",
+        explanation: "df.dropna() drops missing values along a specified axis in Pandas.",
+        topic: "Pandas Data Cleaning",
+        skill: "Python",
+        difficulty: "Easy",
+      }
+    );
+  }
+
+  // 3. Core CS, Java, Data Structures & Software Engineering
+  bank.push(
+    {
+      id: `fb-cs-1`,
+      question: "What is the average time complexity of searching an item in a balanced Binary Search Tree (BST)?",
+      options: ["O(1)", "O(log n)", "O(n)", "O(n log n)"],
+      correctAnswer: "O(log n)",
+      explanation: "A balanced BST halves the search space at each step, yielding logarithmic search time O(log n).",
+      topic: "Data Structures & Algorithms",
+      skill: "DSA",
+      difficulty: "Medium",
+    },
+    {
+      id: `fb-cs-2`,
+      question: "Which Object-Oriented Programming (OOP) principle allows a subclass to provide a specific implementation of a method declared in its superclass?",
+      options: ["Encapsulation", "Abstraction", "Polymorphism (Method Overriding)", "Multiple Inheritance"],
+      correctAnswer: "Polymorphism (Method Overriding)",
+      explanation: "Method overriding allows a subclass to provide a specific implementation of a method already defined in its parent class.",
+      topic: "Object-Oriented Programming",
+      skill: "Core CS",
+      difficulty: "Medium",
+    },
+    {
+      id: `fb-cs-3`,
+      question: "In Git, which command stages changes in the current directory for the next commit?",
+      options: ["git commit -m", "git add .", "git push", "git checkout"],
+      correctAnswer: "git add .",
+      explanation: "git add . adds all new, modified, or deleted files in the working directory to the staging index.",
+      topic: "Git Version Control",
+      skill: "Git",
+      difficulty: "Easy",
+    },
+    {
+      id: `fb-cs-4`,
+      question: "What is a 'deadlock' in operating systems?",
+      options: [
+        "A process crashing due to memory overflow",
+        "A situation where two or more processes are blocked forever, waiting on each other for resources",
+        "A hardware failure in the CPU cache",
+        "An unhandled syntax exception in execution"
+      ],
+      correctAnswer: "A situation where two or more processes are blocked forever, waiting on each other for resources",
+      explanation: "Deadlock occurs when a set of processes are blocked because each process holds a resource and waits for another resource held by some other process.",
+      topic: "Operating Systems",
+      skill: "OS Basics",
+      difficulty: "Hard",
+    },
+    {
+      id: `fb-cs-5`,
+      question: "Which data structure follows the First-In, First-Out (FIFO) principle?",
+      options: ["Stack", "Queue", "Tree", "Graph"],
+      correctAnswer: "Queue",
+      explanation: "A Queue operates on a FIFO basis: the first item inserted is the first item removed.",
+      topic: "Data Structures",
+      skill: "DSA",
+      difficulty: "Easy",
+    },
+    {
+      id: `fb-cs-6`,
+      question: "In Java, what is the default value of a boolean instance variable if not explicitly initialized?",
+      options: ["true", "false", "null", "0"],
+      correctAnswer: "false",
+      explanation: "In Java, instance boolean variables are automatically initialized to false by default.",
+      topic: "Java Fundamentals",
+      skill: "Java",
+      difficulty: "Easy",
+    }
+  );
+
+  // Re-generate unique IDs and duplicate items if count exceeds bank length
+  const result: MCQQuestionItem[] = [];
+  while (result.length < count) {
+    const template = bank[result.length % bank.length];
+    result.push({
+      ...template,
+      id: `q-mcq-${Date.now()}-${result.length + 1}-${Math.random().toString(36).substring(2, 6)}`,
+    });
+  }
+
+  return result.slice(0, count);
+}
+
+// ----------------------------------------------------
+// MCQ TEST SUBMISSION EVALUATION & INTEGRATION LOOP
+// ----------------------------------------------------
+
+export async function evaluateMcqTestSubmission(
+  test: MCQTestDocument,
+  userAnswers: Record<string, string>,
+  user: UserDocument,
+  timeTakenSeconds: number
+): Promise<{
+  score: number;
+  percentage: number;
+  accuracy: number;
+  correctCount: number;
+  incorrectCount: number;
+  unansweredCount: number;
+  skillAnalysis: any[];
+  topicAnalysis: any[];
+  aiAnalysis: {
+    overallFeedback: string;
+    whatYouKnow: string[];
+    whatYouNeedToImprove: string[];
+    recommendedNextStep: string;
+  };
+  detectedSkillGaps: string[];
+  updatedRoadmapTopics: string[];
+}> {
+  const questions = test.questions || [];
+  let correctCount = 0;
+  let incorrectCount = 0;
+  let unansweredCount = 0;
+
+  const skillStats: Record<string, { total: number; correct: number }> = {};
+  const topicStats: Record<string, { total: number; correct: number }> = {};
+
+  questions.forEach((q) => {
+    const ans = (userAnswers[q.id] || "").trim();
+    const isAnswered = ans.length > 0;
+    const isCorrect = isAnswered && ans === q.correctAnswer;
+
+    if (!isAnswered) {
+      unansweredCount++;
+    } else if (isCorrect) {
+      correctCount++;
+    } else {
+      incorrectCount++;
+    }
+
+    // Skill tracking
+    const skillKey = q.skill || test.targetSubject || test.role || "General Technical";
+    if (!skillStats[skillKey]) skillStats[skillKey] = { total: 0, correct: 0 };
+    skillStats[skillKey].total++;
+    if (isCorrect) skillStats[skillKey].correct++;
+
+    // Topic tracking
+    const topicKey = q.topic || q.skill || "Technical Concepts";
+    if (!topicStats[topicKey]) topicStats[topicKey] = { total: 0, correct: 0 };
+    topicStats[topicKey].total++;
+    if (isCorrect) topicStats[topicKey].correct++;
+  });
+
+  const totalQuestions = questions.length || 1;
+  const score = correctCount;
+  const percentage = Math.round((correctCount / totalQuestions) * 100);
+  const attemptedCount = correctCount + incorrectCount;
+  const accuracy = attemptedCount > 0 ? Math.round((correctCount / attemptedCount) * 100) : 0;
+
+  // Build Skill Analysis array
+  const skillAnalysis = Object.keys(skillStats).map((skillName) => {
+    const st = skillStats[skillName];
+    const pct = st.total > 0 ? Math.round((st.correct / st.total) * 100) : 0;
+    let status: "Strong" | "Developing" | "Needs Improvement" = "Developing";
+    if (pct >= 80) status = "Strong";
+    else if (pct < 60) status = "Needs Improvement";
+
+    return {
+      name: skillName,
+      total: st.total,
+      correct: st.correct,
+      percentage: pct,
+      status,
+    };
+  });
+
+  // Build Topic Analysis array
+  const topicAnalysis = Object.keys(topicStats).map((topicName) => {
+    const tt = topicStats[topicName];
+    const pct = tt.total > 0 ? Math.round((tt.correct / tt.total) * 100) : 0;
+    let status: "Strong" | "Developing" | "Needs Improvement" = "Developing";
+    if (pct >= 80) status = "Strong";
+    else if (pct < 60) status = "Needs Improvement";
+
+    return {
+      name: topicName,
+      total: tt.total,
+      correct: tt.correct,
+      percentage: pct,
+      status,
+    };
+  });
+
+  // Identify weak skills / topics (<60% accuracy)
+  const weakSkills = skillAnalysis.filter((s) => s.percentage < 60).map((s) => s.name);
+  const strongSkills = skillAnalysis.filter((s) => s.percentage >= 80).map((s) => s.name);
+  const weakTopics = topicAnalysis.filter((t) => t.percentage < 60).map((t) => t.name);
+  const strongTopics = topicAnalysis.filter((t) => t.percentage >= 80).map((t) => t.name);
+
+  // Generate AI Performance Feedback
+  let aiAnalysis = {
+    overallFeedback: `You scored ${percentage}% (${correctCount}/${totalQuestions}) with ${accuracy}% accuracy.`,
+    whatYouKnow: strongTopics.length > 0 ? strongTopics : [test.targetSubject || test.role],
+    whatYouNeedToImprove: weakTopics.length > 0 ? weakTopics : ["Advanced Problem Solving"],
+    recommendedNextStep: weakTopics.length > 0
+      ? `Focus on reviewing ${weakTopics[0]} in your learning roadmap and complete practical coding exercises.`
+      : `Great job! Take a higher difficulty assessment or proceed to AI Mock Interview.`,
+  };
+
+  if (hasValidGeminiKey()) {
+    try {
+      const feedbackPrompt = `
+Analyze this student's MCQ test performance for placement preparation:
+Target Role: ${test.role}
+Test Focus: ${test.targetSubject || test.role}
+Score: ${correctCount}/${totalQuestions} (${percentage}%)
+Accuracy: ${accuracy}%
+Strong Topics: ${strongTopics.join(", ") || "None"}
+Weak Topics (<60%): ${weakTopics.join(", ") || "None"}
+
+Provide JSON feedback with keys:
+"overallFeedback" (string - 1-2 sentence assessment),
+"whatYouKnow" (array of 2-4 string topics),
+"whatYouNeedToImprove" (array of 2-4 string topics),
+"recommendedNextStep" (string - 1 clear actionable sentence).
+`.trim();
+
+      const aiRes = await generateGeminiJson<any>(feedbackPrompt);
+      if (
+        aiRes &&
+        typeof aiRes.overallFeedback === "string" &&
+        Array.isArray(aiRes.whatYouKnow) &&
+        Array.isArray(aiRes.whatYouNeedToImprove) &&
+        typeof aiRes.recommendedNextStep === "string"
+      ) {
+        aiAnalysis = {
+          overallFeedback: aiRes.overallFeedback,
+          whatYouKnow: aiRes.whatYouKnow.map(String),
+          whatYouNeedToImprove: aiRes.whatYouNeedToImprove.map(String),
+          recommendedNextStep: aiRes.recommendedNextStep,
+        };
+      }
+    } catch (e) {
+      console.warn("AI Feedback generation warning:", e);
+    }
+  }
+
+  // ----------------------------------------------------
+  // INTEGRATION LOOP 1: UPDATE STUDENT SKILL GAP IN DB
+  // ----------------------------------------------------
+  const detectedGaps: string[] = [];
+  try {
+    const studentRoadmapDoc = (await db.roadmaps.findByUserAndRole(user.id, test.role)) || (await db.roadmaps.findByUser(user.id))[0];
+    if (studentRoadmapDoc && studentRoadmapDoc.skillGap) {
+      const existingGap = studentRoadmapDoc.skillGap;
+      const currentMissing = existingGap.missing || [];
+      const currentNeedsImprovement = existingGap.needsImprovement || [];
+      const currentStrong = existingGap.strong || [];
+
+      let updatedMissing = [...currentMissing];
+      let updatedNeedsImprovement = [...currentNeedsImprovement];
+      let updatedStrong = [...currentStrong];
+
+      weakSkills.forEach((ws) => {
+        if (!updatedNeedsImprovement.includes(ws) && !updatedMissing.includes(ws)) {
+          updatedNeedsImprovement.push(ws);
+          detectedGaps.push(ws);
+        }
+        updatedStrong = updatedStrong.filter((s) => s.toLowerCase() !== ws.toLowerCase());
+      });
+
+      strongSkills.forEach((ss) => {
+        if (!updatedStrong.includes(ss)) {
+          updatedStrong.push(ss);
+        }
+        updatedNeedsImprovement = updatedNeedsImprovement.filter((s) => s.toLowerCase() !== ss.toLowerCase());
+        updatedMissing = updatedMissing.filter((s) => s.toLowerCase() !== ss.toLowerCase());
+      });
+
+      studentRoadmapDoc.skillGap = {
+        ...existingGap,
+        strong: updatedStrong,
+        needsImprovement: updatedNeedsImprovement,
+        missing: updatedMissing,
+        analyzedAt: new Date().toISOString(),
+      };
+
+      await db.roadmaps.save(studentRoadmapDoc);
+    }
+  } catch (err) {
+    console.warn("Skill gap integration update warning:", err);
+  }
+
+  // ----------------------------------------------------
+  // INTEGRATION LOOP 2: ADAPT STUDENT ROADMAP IN DB
+  // ----------------------------------------------------
+  const updatedRoadmapTopics: string[] = [];
+  try {
+    const studentRoadmap = await RoadmapModel.findOne({ userId: user.id }).lean().exec();
+    if (studentRoadmap) {
+      let modified = false;
+      const phases = studentRoadmap.phases.map((p) => {
+        const updatedItems = p.items.map((item) => {
+          const itemTopicLower = (item.topic || item.title || "").toLowerCase();
+          const isWeak = weakTopics.some((wt) => itemTopicLower.includes(wt.toLowerCase()) || wt.toLowerCase().includes(itemTopicLower));
+
+          if (isWeak && item.priority !== "High") {
+            modified = true;
+            updatedRoadmapTopics.push(item.topic || item.title);
+            return {
+              ...item,
+              priority: "High" as const,
+              reason: `Bumped to High Priority based on recent MCQ test score (<60% accuracy in ${item.topic || item.title}).`,
+            };
+          }
+          return item;
+        });
+
+        return {
+          ...p,
+          items: updatedItems,
+        };
+      });
+
+      if (modified) {
+        studentRoadmap.phases = phases;
+        await db.roadmaps.save(studentRoadmap as unknown as RoadmapDocument);
+      }
+    }
+  } catch (err) {
+    console.warn("Roadmap adaptation from MCQ test warning:", err);
+  }
+
+  // ----------------------------------------------------
+  // INTEGRATION LOOP 3: RECALCULATE READINESS SCORE IN DB
+  // ----------------------------------------------------
+  try {
+    await calculatePlacementReadiness(user);
+  } catch (err) {
+    console.warn("Readiness score recalculation warning:", err);
+  }
+
+  return {
+    score,
+    percentage,
+    accuracy,
+    correctCount,
+    incorrectCount,
+    unansweredCount,
+    skillAnalysis,
+    topicAnalysis,
+    aiAnalysis,
+    detectedSkillGaps: detectedGaps,
+    updatedRoadmapTopics,
+  };
+}
+
 

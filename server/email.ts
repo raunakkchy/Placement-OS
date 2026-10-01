@@ -60,13 +60,13 @@ function maskEmail(email: string): string {
 export async function sendOtpEmail({ to, otp }: SendOtpEmailParams): Promise<boolean> {
   const mailTransporter = getMailTransporter();
   const smtpUser = process.env.SMTP_USER?.trim() || "";
-  // Use "Raunak Kumar (Placement OS)" so Gmail doesn't flag mismatched identity
-  const from = process.env.MAIL_FROM?.trim() || (smtpUser ? `Raunak Kumar (Placement OS) <${smtpUser}>` : "Placement OS <noreply@placementos.com>");
+  // Display strictly as "Placement OS"
+  const from = process.env.MAIL_FROM?.trim() || (smtpUser ? `"Placement OS" <${smtpUser}>` : "Placement OS <noreply@placementos.com>");
   const replyTo = smtpUser || from;
 
-  const subject = `${otp} is your Placement OS verification code`;
+  const subject = "Verify Your Email - Placement OS Password Reset OTP";
 
-  const textContent = `Placement OS Password Reset\n\nYour verification code is: ${otp}\n\nThis code will expire in 5 minutes.\nIf you did not request this password reset, please ignore this email.`;
+  const textContent = `Placement OS Password Reset\n\nYour 6-digit verification code is: ${otp}\n\nThis OTP is valid for 5 minutes.\nIf you did not request a password reset, please ignore this email. Do not share this OTP with anyone.`;
 
   const htmlContent = `
 <!DOCTYPE html>
@@ -74,31 +74,47 @@ export async function sendOtpEmail({ to, otp }: SendOtpEmailParams): Promise<boo
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>${otp} is your Placement OS verification code</title>
+  <title>Verify Your Email - Placement OS Password Reset OTP</title>
 </head>
-<body style="margin: 0; padding: 24px 12px; background-color: #f7f7f8; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; color: #111827;">
-  <table role="presentation" border="0" cellpadding="0" cellspacing="0" width="100%" style="max-width: 480px; margin: 0 auto; background: #ffffff; border-radius: 12px; border: 1px solid #e5e7eb; overflow: hidden;">
+<body style="margin: 0; padding: 32px 16px; background-color: #f4f5f7; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; color: #1e293b;">
+  <table role="presentation" border="0" cellpadding="0" cellspacing="0" width="100%" style="max-width: 520px; margin: 0 auto;">
     <tr>
-      <td style="padding: 32px 28px 24px 28px; text-align: left;">
-        <div style="font-size: 19px; font-weight: 700; color: #111827; letter-spacing: -0.3px; margin-bottom: 20px;">
+      <td style="background: #ffffff; border-radius: 16px; border: 1px solid #e2e8f0; padding: 36px 32px 28px 32px; box-shadow: 0 4px 12px rgba(0,0,0,0.03);">
+        <!-- Logo / Title -->
+        <div style="font-size: 20px; font-weight: 800; color: #0f172a; letter-spacing: -0.3px; margin-bottom: 24px;">
           Placement OS
         </div>
-        <h1 style="font-size: 20px; font-weight: 600; color: #111827; margin: 0 0 12px 0;">Password Reset Code</h1>
-        <p style="font-size: 15px; color: #4b5563; line-height: 1.5; margin: 0 0 24px 0;">
-          Here is your 6-digit verification code to reset your account password:
+
+        <h1 style="font-size: 22px; font-weight: 700; color: #0f172a; margin: 0 0 16px 0; letter-spacing: -0.3px;">
+          Reset Your Password
+        </h1>
+
+        <p style="font-size: 15px; color: #475569; line-height: 1.6; margin: 0 0 28px 0;">
+          Here is your 6-digit verification code to reset your Placement OS account password:
         </p>
-        <div style="background-color: #f3f4f6; border-radius: 10px; padding: 20px; text-align: center; margin: 0 0 24px 0;">
-          <span style="font-family: 'Courier New', Courier, monospace; font-size: 34px; font-weight: 700; letter-spacing: 8px; color: #111827; display: inline-block;">${otp}</span>
-          <div style="font-size: 13px; color: #6b7280; margin-top: 8px;">Valid for 5 minutes</div>
+
+        <!-- OTP Box -->
+        <div style="background-color: #f1f5f9; border-radius: 12px; padding: 24px; text-align: center; margin: 0 0 28px 0;">
+          <div style="font-family: 'Courier New', Courier, monospace; font-size: 38px; font-weight: 800; letter-spacing: 10px; color: #1e3a8a; display: inline-block;">
+            ${otp}
+          </div>
+          <div style="font-size: 13px; font-weight: 500; color: #64748b; margin-top: 10px;">
+            This OTP is valid for 5 minutes
+          </div>
         </div>
-        <p style="font-size: 13px; color: #6b7280; line-height: 1.5; margin: 0;">
-          If you did not request a password reset, you can safely ignore this email.
+
+        <p style="font-size: 13.5px; color: #64748b; line-height: 1.5; margin: 0 0 24px 0;">
+          If you did not request a password reset, you can safely ignore this email. Do not share this OTP with anyone.
         </p>
+
+        <div style="border-top: 1px solid #f1f5f9; padding-top: 20px; margin-top: 20px; font-size: 12.5px; color: #94a3b8; line-height: 1.5;">
+          This is an automated security transmission. Placement OS administrators will never ask for your verification code.
+        </div>
       </td>
     </tr>
     <tr>
-      <td style="padding: 16px 28px; background-color: #fafafa; border-top: 1px solid #f3f4f6; text-align: center; font-size: 12px; color: #9ca3af;">
-        Placement OS &bull; Automated Verification
+      <td style="padding-top: 20px; text-align: center; font-size: 12px; color: #94a3b8;">
+        &copy; 2026 Placement OS. All rights reserved.
       </td>
     </tr>
   </table>
@@ -141,14 +157,14 @@ export async function sendRegistrationOtpEmail({
 }): Promise<boolean> {
   const mailTransporter = getMailTransporter();
   const smtpUser = process.env.SMTP_USER?.trim() || "";
-  // Use "Raunak Kumar (Placement OS)" so Gmail doesn't flag mismatched identity
-  const from = process.env.MAIL_FROM?.trim() || (smtpUser ? `Raunak Kumar (Placement OS) <${smtpUser}>` : "Placement OS <noreply@placementos.com>");
+  // Display strictly as "Placement OS"
+  const from = process.env.MAIL_FROM?.trim() || (smtpUser ? `"Placement OS" <${smtpUser}>` : "Placement OS <noreply@placementos.com>");
   const replyTo = smtpUser || from;
 
-  const greeting = studentName?.trim() ? `Hello ${studentName.trim()},` : "Hello,";
-  const subject = `${otp} is your Placement OS verification code`;
+  const displayName = studentName?.trim() || "Student";
+  const subject = "Verify Your Email - Placement OS Student Registration OTP";
 
-  const textContent = `${greeting}\n\nYour Placement OS student account verification code is: ${otp}\n\nThis code will expire in 5 minutes.\nPlease enter it on the registration screen to complete your account setup.\n\nIf you did not attempt to register, please ignore this email.`;
+  const textContent = `Hello ${displayName},\n\nWelcome to Placement OS! Enter the 6-digit verification code below to verify your email address and activate your student account:\n\n${otp}\n\nThis OTP is valid for 5 minutes.\n\nIf you did not attempt to register on Placement OS, you can safely ignore this email. Do not share this OTP with anyone.`;
 
   const htmlContent = `
 <!DOCTYPE html>
@@ -156,31 +172,47 @@ export async function sendRegistrationOtpEmail({
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>${otp} is your Placement OS verification code</title>
+  <title>Verify Your Email - Placement OS Student Registration OTP</title>
 </head>
-<body style="margin: 0; padding: 24px 12px; background-color: #f7f7f8; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; color: #111827;">
-  <table role="presentation" border="0" cellpadding="0" cellspacing="0" width="100%" style="max-width: 480px; margin: 0 auto; background: #ffffff; border-radius: 12px; border: 1px solid #e5e7eb; overflow: hidden;">
+<body style="margin: 0; padding: 32px 16px; background-color: #f4f5f7; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; color: #1e293b;">
+  <table role="presentation" border="0" cellpadding="0" cellspacing="0" width="100%" style="max-width: 520px; margin: 0 auto;">
     <tr>
-      <td style="padding: 32px 28px 24px 28px; text-align: left;">
-        <div style="font-size: 19px; font-weight: 700; color: #111827; letter-spacing: -0.3px; margin-bottom: 20px;">
+      <td style="background: #ffffff; border-radius: 16px; border: 1px solid #e2e8f0; padding: 36px 32px 28px 32px; box-shadow: 0 4px 12px rgba(0,0,0,0.03);">
+        <!-- Logo / Title -->
+        <div style="font-size: 20px; font-weight: 800; color: #0f172a; letter-spacing: -0.3px; margin-bottom: 24px;">
           Placement OS
         </div>
-        <h1 style="font-size: 20px; font-weight: 600; color: #111827; margin: 0 0 12px 0;">Verify your email address</h1>
-        <p style="font-size: 15px; color: #4b5563; line-height: 1.5; margin: 0 0 20px 0;">
-          ${greeting} welcome to Placement OS! Please use the following code to confirm your email and activate your student account:
+
+        <h1 style="font-size: 22px; font-weight: 700; color: #0f172a; margin: 0 0 16px 0; letter-spacing: -0.3px;">
+          Verify Your Email Address
+        </h1>
+
+        <p style="font-size: 15px; color: #475569; line-height: 1.6; margin: 0 0 28px 0;">
+          Hello ${displayName}, Welcome to Placement OS! Enter the 6-digit verification code below to verify your email address and activate your student account:
         </p>
-        <div style="background-color: #f3f4f6; border-radius: 10px; padding: 20px; text-align: center; margin: 0 0 24px 0;">
-          <span style="font-family: 'Courier New', Courier, monospace; font-size: 34px; font-weight: 700; letter-spacing: 8px; color: #111827; display: inline-block;">${otp}</span>
-          <div style="font-size: 13px; color: #6b7280; margin-top: 8px;">Valid for 5 minutes</div>
+
+        <!-- OTP Box -->
+        <div style="background-color: #f1f5f9; border-radius: 12px; padding: 24px; text-align: center; margin: 0 0 28px 0;">
+          <div style="font-family: 'Courier New', Courier, monospace; font-size: 38px; font-weight: 800; letter-spacing: 10px; color: #1e3a8a; display: inline-block;">
+            ${otp}
+          </div>
+          <div style="font-size: 13px; font-weight: 500; color: #64748b; margin-top: 10px;">
+            This OTP is valid for 5 minutes
+          </div>
         </div>
-        <p style="font-size: 13px; color: #6b7280; line-height: 1.5; margin: 0;">
-          If you didn't create an account with Placement OS, you can safely ignore this message.
+
+        <p style="font-size: 13.5px; color: #64748b; line-height: 1.5; margin: 0 0 24px 0;">
+          If you did not attempt to register on Placement OS, you can safely ignore this email. Do not share this OTP with anyone.
         </p>
+
+        <div style="border-top: 1px solid #f1f5f9; padding-top: 20px; margin-top: 20px; font-size: 12.5px; color: #94a3b8; line-height: 1.5;">
+          This is an automated security transmission. Placement OS administrators will never ask for your verification code.
+        </div>
       </td>
     </tr>
     <tr>
-      <td style="padding: 16px 28px; background-color: #fafafa; border-top: 1px solid #f3f4f6; text-align: center; font-size: 12px; color: #9ca3af;">
-        Placement OS &bull; Student Career Readiness System
+      <td style="padding-top: 20px; text-align: center; font-size: 12px; color: #94a3b8;">
+        &copy; 2026 Placement OS. All rights reserved.
       </td>
     </tr>
   </table>
@@ -206,7 +238,7 @@ export async function sendRegistrationOtpEmail({
     }
   } else {
     console.warn(
-      `[Email Service] SMTP is not configured. Simulated registration OTP was securely stored for ${maskEmail(to)}.`
+      `[Email Service] Simulated registration OTP stored for ${maskEmail(to)}.`
     );
     return true;
   }

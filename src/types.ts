@@ -455,15 +455,83 @@ export interface DashboardData {
     title: string;
     description: string;
     actionLabel: string;
-    targetTab: "score" | "jobs" | "roadmap" | "interview";
+    targetTab: "score" | "jobs" | "roadmap" | "interview" | "mcq";
     reason: string;
+  };
+  mcqStats?: {
+    testsCompleted: number;
+    averageScorePercent: number;
+    strongestSkill: string | null;
+    needsImprovementSkill: string | null;
+    latestTestAt: string | null;
   };
   recentActivities?: DashboardActivity[];
 }
 
 export interface DashboardActivity {
   id: string;
-  type: "profile" | "role" | "skill_gap" | "roadmap" | "interview" | "resume";
+  type: "profile" | "role" | "skill_gap" | "roadmap" | "interview" | "resume" | "mcq";
   title: string;
   timestamp: string | null;
+}
+
+// ----------------------------------------------------
+// MCQ ASSESSMENT TYPES
+// ----------------------------------------------------
+
+export interface MCQQuestion {
+  id: string;
+  question: string;
+  options: string[];
+  correctAnswer?: string; // Hidden during test taking for security!
+  explanation?: string;   // Hidden during test taking for security!
+  topic: string;
+  skill: string;
+  difficulty: "Easy" | "Medium" | "Hard";
+}
+
+export interface SkillTopicPerformance {
+  name: string;
+  total: number;
+  correct: number;
+  percentage: number;
+  status: "Strong" | "Developing" | "Needs Improvement";
+}
+
+export interface MCQTestSummary {
+  id: string;
+  userId: string;
+  role: string;
+  testType: "role" | "skill" | "skill_gap" | "roadmap";
+  testTypeLabel: string;
+  targetSubject?: string;
+  difficulty: "Easy" | "Medium" | "Hard" | "Adaptive";
+  totalQuestions: number;
+  score: number;
+  percentage: number;
+  accuracy: number;
+  correctCount: number;
+  incorrectCount: number;
+  unansweredCount: number;
+  timeTakenSeconds: number;
+  timeLimitMinutes: number;
+  status: "in_progress" | "completed" | "expired";
+  startedAt: string;
+  submittedAt?: string;
+}
+
+export interface MCQTestResult extends MCQTestSummary {
+  questions: MCQQuestion[];
+  userAnswers: Record<string, string>;
+  markedForReview?: string[];
+  skillAnalysis: SkillTopicPerformance[];
+  topicAnalysis: SkillTopicPerformance[];
+  aiAnalysis?: {
+    overallFeedback: string;
+    whatYouKnow: string[];
+    whatYouNeedToImprove: string[];
+    recommendedNextStep: string;
+  };
+  detectedSkillGaps?: string[];
+  updatedRoadmapTopics?: string[];
 }
